@@ -1,0 +1,13 @@
+# 비밀 정보·환경 변수
+.env
+.env.*
+*.key
+*.pem
+secrets*
+
+# 로컬 도구·시스템 파일
+.claude/
+node_modules/
+Thumbs.db
+Desktop.ini
+.DS_Store
