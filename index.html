@@ -197,6 +197,7 @@
     </div>
     <button id="pdfBtn" class="primary">📄 PDF 저장</button>
     <button id="xlsxBtn">📊 엑셀 저장</button>
+    <button id="sheetsBtn">🟩 구글 시트로 보내기</button>
     <button id="printBtn">🖨 인쇄</button>
     <button id="resetBtn" class="danger">초기화</button>
   </div>
@@ -273,6 +274,7 @@
         <tbody id="book"></tbody>
       </table>
       <p id="empty">아직 고른 단어가 없어요.</p>
+      <div id="exportHint" class="hint hidden" style="border:1px solid var(--accent);border-radius:8px;padding:10px 12px;margin-top:12px;color:var(--text);line-height:1.7"></div>
       <p class="hint">뜻은 눌러서 고칠 수 있어요. 내장 사전에 없는 단어는 외부 사전(자동 번역)에서 찾아 주고, [사전]을 누르면 네이버 영어사전에서 확인할 수 있어요. 단어장은 이 기기의 브라우저에 자동 저장됩니다.</p>
     </div>
   </section>
@@ -3669,7 +3671,7 @@ zoo=동물원
       });
       $('#empty').classList.toggle('hidden', words.length > 0);
       $('#count').textContent = words.length ? `${words.length}개` : '';
-      ['#printBtn', '#pdfBtn', '#xlsxBtn'].forEach((s) => { $(s).disabled = words.length === 0; });
+      ['#printBtn', '#pdfBtn', '#xlsxBtn', '#sheetsBtn'].forEach((s) => { $(s).disabled = words.length === 0; });
       updateActiveTabBadge(words.length);
     }
 
@@ -3693,17 +3695,42 @@ zoo=동물원
       printBook();
     });
 
-    // 엑셀(.xlsx) 저장
-    $('#xlsxBtn').addEventListener('click', () => {
+    // 엑셀·구글 시트에 들어갈 표
+    const bookRows = () => {
       const name = nameInput.value.trim();
-      const rows = [
+      return [
         [`${title} 단어장`],
         [name ? `이름: ${name}` : ''],
         [],
         ['번호', '영어(원형)', '지문 속 형태', '한국어 뜻'],
         ...words.map((x, i) => [i + 1, x.base, x.base !== x.w ? x.w : '', x.m]),
       ];
-      downloadBlob(makeXlsx(rows, [6, 20, 18, 45]), fileBase() + '.xlsx');
+    };
+
+    // 엑셀(.xlsx) 저장
+    $('#xlsxBtn').addEventListener('click', () => {
+      downloadBlob(makeXlsx(bookRows(), [6, 20, 18, 45]), fileBase() + '.xlsx');
+    });
+
+    // 구글 시트로 보내기: 표를 복사해 두고, 학생 계정의 새 구글 시트를 연다 → A1에 붙여넣기
+    $('#sheetsBtn').addEventListener('click', () => {
+      const tsv = bookRows()
+        .map((r) => r.map((v) => String(v).replace(/[\t\r\n]+/g, ' ')).join('\t'))
+        .join('\n');
+      const copied = copyText(tsv);
+      window.open('https://sheets.new', '_blank', 'noopener');
+      const box = $('#exportHint');
+      box.innerHTML = '';
+      const lines = copied
+        ? ['✅ 단어장을 복사했고, 새 구글 시트를 열었어요.',
+          '① 새 시트의 맨 왼쪽 위 칸(A1)을 누르고',
+          '② 붙여넣기 하세요 (Ctrl+V · 태블릿은 칸을 길게 눌러 [붙여넣기])',
+          `③ 위쪽 "제목 없는 스프레드시트"를 눌러 이름을 "${fileBase()}"(으)로 바꾸면 끝!`,
+          '구글 드라이브에 자동 저장되어 언제든 다시 열어 고칠 수 있어요.']
+        : ['⚠️ 자동 복사가 막혔어요. [엑셀 저장]으로 파일을 받은 뒤 구글 드라이브에 올려 구글 시트로 열어 주세요.'];
+      lines.forEach((t) => { const p = document.createElement('div'); p.textContent = t; box.append(p); });
+      box.classList.remove('hidden');
+      box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     });
     $('#resetBtn').addEventListener('click', () => {
       if (!confirm('이 지문에서 고른 단어를 모두 지울까요?')) return;
