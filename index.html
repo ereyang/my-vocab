@@ -3263,6 +3263,20 @@ zoo=동물원
   // 선생님이 배포한 Apps Script 웹 앱 주소. 비어 있으면 저장된 지문 기능은 꺼지고 링크 방식만 쓴다.
   const API_URL = 'https://script.google.com/macros/s/AKfycbwE71w23SGbJVr6vrbqazxoceS82e9s_wDB_YWyUbX_tUvMPsriKK_1X-Y4jIzUSwsS/exec';
 
+  // 학생 계정으로 실행되는 '구글 시트 만들기' Apps Script 주소 (apps-script/SheetExport.gs).
+  // 비어 있으면 [구글 시트로 보내기]는 복사 → 붙여넣기 방식으로 동작한다.
+  const SHEETS_URL = '';
+
+  // 주소에 실어 보낼 데이터: gzip 압축 후 base64url (d=), 압축이 안 되면 그대로 (p=)
+  async function packForUrl(str) {
+    const bytes = new TextEncoder().encode(str);
+    if ('CompressionStream' in window) {
+      const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('gzip'));
+      return 'd=' + toB64(new Uint8Array(await new Response(stream).arrayBuffer()));
+    }
+    return 'p=' + toB64(bytes);
+  }
+
   const api = {
     // 모든 지문 [{id, title, text, gloss, updated}]. 실패하면 마지막으로 받은 목록(캐시)을 쓴다.
     async list() {
@@ -3644,10 +3658,6 @@ zoo=동물원
         const tr = document.createElement('tr');
         const no = document.createElement('td'); no.className = 'no'; no.textContent = idx + 1;
         const en = document.createElement('td'); en.className = 'en'; en.textContent = x.base;
-        if (x.base !== x.w) {
-          const s = document.createElement('span'); s.className = 'base'; s.textContent = `지문: ${x.w}`;
-          en.append(s);
-        }
         const dl = document.createElement('a');
         dl.className = 'dictlink'; dl.href = naverLink(x.base); dl.target = '_blank'; dl.rel = 'noopener';
         dl.textContent = '사전 ↗'; dl.title = '네이버 영어사전에서 보기';
@@ -3702,36 +3712,53 @@ zoo=동물원
         [`${title} 단어장`],
         [name ? `이름: ${name}` : ''],
         [],
-        ['번호', '영어(원형)', '지문 속 형태', '한국어 뜻'],
-        ...words.map((x, i) => [i + 1, x.base, x.base !== x.w ? x.w : '', x.m]),
+        ['영어', '한국어 뜻'],
+        ...words.map((x) => [x.base, x.m]),
       ];
     };
 
     // 엑셀(.xlsx) 저장
     $('#xlsxBtn').addEventListener('click', () => {
-      downloadBlob(makeXlsx(bookRows(), [6, 20, 18, 45]), fileBase() + '.xlsx');
+      downloadBlob(makeXlsx(bookRows(), [22, 50]), fileBase() + '.xlsx');
     });
 
-    // 구글 시트로 보내기: 표를 복사해 두고, 학생 계정의 새 구글 시트를 연다 → A1에 붙여넣기
-    $('#sheetsBtn').addEventListener('click', () => {
+    // 구글 시트로 보내기
+    $('#sheetsBtn').addEventListener('click', async () => {
+      // 학생 계정으로 실행되는 Apps Script가 있으면: 학생 드라이브에 시트를 자동으로 만들어 채운다
+      if (SHEETS_URL) {
+        const win = window.open('', '_blank'); // 팝업 차단을 피하려고 클릭 직후 먼저 연다
+        const payload = JSON.stringify({ title, name: nameInput.value.trim(), file: fileBase(), rows: words.map((x) => [x.base, x.m]) });
+        const url = SHEETS_URL + '?' + await packForUrl(payload);
+        if (win) { win.opener = null; win.location.href = url; } else { location.href = url; }
+        showExportHint([
+          '✅ 새 탭에서 내 구글 시트를 만들고 있어요.',
+          '처음 한 번은 학교 구글 계정을 고르고 [허용]을 눌러 주세요. (허용한 뒤 시트가 안 생기면 버튼을 한 번 더 누르세요)',
+          '완료되면 [내 구글 시트 열기]를 누르세요. 같은 지문은 다시 보내면 같은 시트가 최신 내용으로 바뀌어요.',
+        ]);
+        return;
+      }
+      // 없으면: 표를 복사해 두고 새 구글 시트를 열어 붙여넣게 안내
       const tsv = bookRows()
         .map((r) => r.map((v) => String(v).replace(/[\t\r\n]+/g, ' ')).join('\t'))
         .join('\n');
       const copied = copyText(tsv);
       window.open('https://sheets.new', '_blank', 'noopener');
-      const box = $('#exportHint');
-      box.innerHTML = '';
-      const lines = copied
+      showExportHint(copied
         ? ['✅ 단어장을 복사했고, 새 구글 시트를 열었어요.',
           '① 새 시트의 맨 왼쪽 위 칸(A1)을 누르고',
           '② 붙여넣기 하세요 (Ctrl+V · 태블릿은 칸을 길게 눌러 [붙여넣기])',
           `③ 위쪽 "제목 없는 스프레드시트"를 눌러 이름을 "${fileBase()}"(으)로 바꾸면 끝!`,
           '구글 드라이브에 자동 저장되어 언제든 다시 열어 고칠 수 있어요.']
-        : ['⚠️ 자동 복사가 막혔어요. [엑셀 저장]으로 파일을 받은 뒤 구글 드라이브에 올려 구글 시트로 열어 주세요.'];
+        : ['⚠️ 자동 복사가 막혔어요. [엑셀 저장]으로 파일을 받은 뒤 구글 드라이브에 올려 구글 시트로 열어 주세요.']);
+    });
+
+    function showExportHint(lines) {
+      const box = $('#exportHint');
+      box.textContent = '';
       lines.forEach((t) => { const p = document.createElement('div'); p.textContent = t; box.append(p); });
       box.classList.remove('hidden');
       box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    });
+    }
     $('#resetBtn').addEventListener('click', () => {
       if (!confirm('이 지문에서 고른 단어를 모두 지울까요?')) return;
       words = []; store.del(key); render();
