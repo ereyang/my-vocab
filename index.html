@@ -3091,10 +3091,20 @@ zoo=동물원
       $('#linkArea').classList.add('hidden');
       const n = $('#tText').value.length + $('#tGloss').value.length;
       $('#lenHint').textContent = n ? `${$('#tText').value.length.toLocaleString()}자` + (n > 6000 ? ' · 지문과 목록이 길어서 링크가 매우 길어질 수 있어요.' : '') : '';
-      const g = parseGloss($('#tGloss').value).size;
-      $('#glossHint').textContent = g
-        ? `단어 ${g}개가 인식됐어요. 학생이 이 단어를 누르면 선생님 뜻이 먼저 나와요.`
-        : '학생이 이 목록에 있는 단어를 누르면 선생님 뜻이 가장 먼저 나와요. 목록에 없는 단어는 내장 사전 → 외부 사전 순으로 찾아요.';
+      const glossMap = parseGloss($('#tGloss').value);
+      if (!glossMap.size) {
+        $('#glossHint').textContent = '학생이 이 목록에 있는 단어를 누르면 선생님 뜻이 가장 먼저 나와요. 목록에 없는 단어는 내장 사전 → 외부 사전 순으로 찾아요.';
+      } else {
+        // 지문 단어 중 목록에 없는 것(원형으로도 못 찾는 것)을 보여 준다
+        const seen = new Set();
+        const missing = ($('#tText').value.match(/[A-Za-z]+(?:['’][A-Za-z]+)*/g) || [])
+          .map(normalize)
+          .filter((w) => !seen.has(w) && seen.add(w) && !candidates(w).some((c) => glossMap.has(c)));
+        $('#glossHint').textContent = `단어 ${glossMap.size}개가 인식됐어요. `
+          + (missing.length
+            ? `지문 단어 중 목록에 없는 ${missing.length}개(내장 사전으로 대신 찾아요): ${missing.join(', ')}`
+            : '지문의 모든 단어가 목록에 있어요 ✓');
+      }
     };
     $('#tTitle').addEventListener('input', saveDraft);
     $('#tText').addEventListener('input', saveDraft);
@@ -3104,8 +3114,8 @@ zoo=동물원
     $('#copyPrompt').addEventListener('click', async () => {
       const text = $('#tText').value.trim();
       if (!text) { alert('영어 지문을 먼저 붙여넣어 주세요.'); return; }
-      const prompt = '다음 영어 지문에서 중고등학생이 모를 만한 단어를 모두 골라, 이 지문의 문맥에 맞는 한국어 뜻을 정리해 줘.\n'
-        + '형식: 한 줄에 하나씩 "영어 단어 = 한국어 뜻" (지문에 나온 형태 그대로, 설명·번호·표 없이)\n\n' + text;
+      const prompt = '다음 영어 지문에 나오는 모든 단어(a, the, is 같은 기본 단어 포함)의 한국어 뜻을 이 지문의 문맥에 맞게 정리해 줘.\n'
+        + '형식: 한 줄에 하나씩 "영어 단어 = 한국어 뜻" (지문에 나온 형태 그대로, 같은 단어는 한 번만, 설명·번호·표 없이)\n\n' + text;
       try { await navigator.clipboard.writeText(prompt); } catch { prompt && window.prompt('아래 내용을 복사하세요', prompt); return; }
       $('#copyPrompt').textContent = '복사됨 ✓ — ChatGPT·Claude에 붙여넣고, 답을 위 칸에 붙여넣으세요';
       setTimeout(() => { $('#copyPrompt').textContent = 'ChatGPT·Claude에 물어볼 문장 복사'; }, 4000);
