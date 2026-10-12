@@ -221,8 +221,8 @@
     <label for="tText">영어 지문</label>
     <textarea id="tText" placeholder="학생들에게 보여 줄 영어 지문을 붙여넣으세요."></textarea>
     <p class="hint" id="lenHint"></p>
-    <label for="tGloss">선생님 단어 뜻 목록 <span style="font-weight:400;color:var(--muted)">(선택 · 한 줄에 하나씩 "단어 = 문맥상 뜻")</span></label>
-    <textarea id="tGloss" style="min-height:160px" placeholder="bank = 둑, 강기슭&#10;resilient = 회복력 있는&#10;found = 찾았다"></textarea>
+    <label for="tGloss">선생님 단어 뜻 목록 <span style="font-weight:400;color:var(--muted)">(선택 · 한 줄에 하나씩 "지문 속 형태 = 원형 = 뜻" 또는 "단어 = 뜻")</span></label>
+    <textarea id="tGloss" style="min-height:160px" placeholder="studied = study = 공부하다&#10;banks = bank = 둑, 강기슭&#10;resilient = resilient = 회복력 있는"></textarea>
     <p class="hint" id="glossHint">학생이 이 목록에 있는 단어를 누르면 선생님 뜻이 가장 먼저 나와요. 목록에 없는 단어는 내장 사전 → 외부 사전 순으로 찾아요.</p>
     <div class="row">
       <button id="askGpt" class="primary">ChatGPT로 뜻 목록 만들기 ↗</button>
@@ -3028,21 +3028,50 @@ zoo=동물원
     return word.toLowerCase().replace(/’/g, "'").replace(/'s$|'$/, '');
   }
 
-  // 원형 후보를 차례로 찾는다: 선생님 목록 → 내장 사전
+  // 원형과 뜻을 찾는다: 선생님 목록 → 내장 사전. base는 단어장에 올라갈 원형.
   function lookup(word, gloss) {
     const cands = candidates(word);
-    for (const c of cands) if (gloss && gloss.has(c)) return { base: c, meaning: gloss.get(c), src: 'teacher' };
+    for (const c of cands) if (gloss && gloss.has(c)) { const g = gloss.get(c); return { base: g.base, meaning: g.meaning, src: 'teacher' }; }
     for (const c of cands) if (DICT.has(c)) return { base: c, meaning: DICT.get(c), src: 'dict' };
     return { base: cands[0], meaning: '', src: '' };
   }
 
-  // 선생님 목록: "단어 = 뜻" (=, 탭, :, - 구분 모두 허용)
+  // 원형 추정: 불규칙 변화 → 내장 사전에 있는 원형 후보 → 그대로
+  function guessBase(word) {
+    const w = normalize(word);
+    if (IRREGULAR[w]) return IRREGULAR[w];
+    if (DICT.has(w)) return w;
+    return candidates(w).find((c) => DICT.has(c)) || w;
+  }
+
+  // 선생님 목록. 한 줄에 하나씩:
+  //   "지문 속 형태 = 원형 = 원형의 뜻"  (예: studied = study = 공부하다)
+  //   "단어 = 뜻"                        (=, 탭, :, - 구분 모두 허용. 원형은 앱이 추정)
+  // 결과: Map(형태 → {base, meaning}). 원형으로도 찾을 수 있게 함께 넣는다. .count = 인식된 줄 수
   function parseGloss(str) {
     const map = new Map();
-    (str || '').split(/\r?\n/).forEach((line) => {
-      const m = line.match(/^\s*[-*•\d.)\s]*([A-Za-z][A-Za-z'’ -]*?)\s*(?:=|\t|:|\s-\s|–|—)\s*(.+?)\s*$/);
-      if (m) map.set(normalize(m[1].trim()), m[2]);
+    let count = 0;
+    const isWord = (s) => /^[A-Za-z][A-Za-z'’ -]*$/.test(s);
+    (str || '').split(/\r?\n/).forEach((raw) => {
+      const line = raw.replace(/^\s*(?:[-*•]|\d+[.)])\s*/, '').trim();
+      const parts = line.split(/\s*=\s*/);
+      if (parts.length >= 3 && isWord(parts[0]) && isWord(parts[1])) {
+        const surface = normalize(parts[0]), base = normalize(parts[1]);
+        const meaning = parts.slice(2).join(' = ').trim();
+        if (!meaning) return;
+        map.set(surface, { base, meaning });
+        if (!map.has(base)) map.set(base, { base, meaning });
+        count++;
+        return;
+      }
+      const m = line.match(/^([A-Za-z][A-Za-z'’ -]*?)\s*(?:=|\t|:|\s-\s|–|—)\s*(.+?)$/);
+      if (m) {
+        const surface = normalize(m[1].trim());
+        map.set(surface, { base: guessBase(surface), meaning: m[2].trim() });
+        count++;
+      }
     });
+    map.count = count;
     return map;
   }
 
@@ -3371,7 +3400,7 @@ zoo=동물원
         const missing = ($('#tText').value.match(/[A-Za-z]+(?:['’][A-Za-z]+)*/g) || [])
           .map(normalize)
           .filter((w) => !seen.has(w) && seen.add(w) && !candidates(w).some((c) => glossMap.has(c)));
-        $('#glossHint').textContent = `단어 ${glossMap.size}개가 인식됐어요. `
+        $('#glossHint').textContent = `단어 ${glossMap.count}개가 인식됐어요. `
           + (missing.length
             ? `지문 단어 중 목록에 없는 ${missing.length}개(내장 사전으로 대신 찾아요): ${missing.join(', ')}`
             : '지문의 모든 단어가 목록에 있어요 ✓');
@@ -3385,8 +3414,10 @@ zoo=동물원
     const buildPrompt = () => {
       const text = $('#tText').value.trim();
       if (!text) { alert('영어 지문을 먼저 붙여넣어 주세요.'); return ''; }
-      return '다음 영어 지문에 나오는 모든 단어(a, the, is 같은 기본 단어 포함)의 한국어 뜻을 이 지문의 문맥에 맞게 정리해 줘.\n'
-        + '형식: 한 줄에 하나씩 "영어 단어 = 한국어 뜻" (지문에 나온 형태 그대로, 같은 단어는 한 번만, 설명·번호·표 없이)\n'
+      return '다음 영어 지문에 나오는 모든 단어(a, the, is 같은 기본 단어 포함)를 단어장용으로 정리해 줘. 뜻은 이 지문의 문맥에 맞게.\n'
+        + '형식: 한 줄에 하나씩 "지문에 나온 형태 = 원형 = 원형의 한국어 뜻"\n'
+        + '예: studied = study = 공부하다 / children = child = 아이 / beautiful = beautiful = 아름다운\n'
+        + '규칙: 동사는 동사원형, 명사는 단수형, 형용사·부사는 원급으로. 같은 형태는 한 번만. 설명·번호·표 없이.\n'
         + '지문은 맨 끝에 [지문 끝] 표시가 있어. 이 표시가 보이지 않으면 목록을 만들지 말고 "지문이 잘렸어요"라고만 답해 줘.\n\n'
         + text + '\n\n[지문 끝]';
     };
@@ -3473,7 +3504,7 @@ zoo=동물원
           const open = document.createElement('button'); open.type = 'button'; open.className = 'open';
           open.textContent = p.title;
           const s = document.createElement('span'); s.className = 'meta';
-          s.textContent = `단어 뜻 ${parseGloss(p.gloss).size}개`;
+          s.textContent = `단어 뜻 ${parseGloss(p.gloss).count}개`;
           open.append(s);
           open.addEventListener('click', () => {
             if (editingId !== p.id && hasContent() && !confirm('지금 쓰고 있는 내용 대신 이 지문을 불러올까요?')) return;
@@ -3567,14 +3598,18 @@ zoo=동물원
     }
     passage.append(text.slice(last));
 
+    // 단어장은 원형 기준: studied와 studies를 눌러도 study 하나로 담긴다
+    const found = new Map();
+    const find = (k) => { if (!found.has(k)) found.set(k, lookup(k, gloss)); return found.get(k); };
+
     passage.addEventListener('click', (e) => {
       const b = e.target.closest('.w');
       if (!b) return;
       const k = b.dataset.key;
-      const i = words.findIndex((x) => x.w === k);
+      const r = find(k);
+      const i = words.findIndex((x) => x.base === r.base);
       if (i >= 0) words.splice(i, 1);
       else {
-        const r = lookup(k, gloss);
         const x = { w: k, base: r.base, m: r.meaning, src: r.src };
         words.push(x);
         if (!x.m) fillExternal(x);
@@ -3598,17 +3633,17 @@ zoo=동물원
     }
 
     function render() {
-      const picked = new Set(words.map((x) => x.w));
-      passage.querySelectorAll('.w').forEach((b) => b.classList.toggle('picked', picked.has(b.dataset.key)));
+      const picked = new Set(words.map((x) => x.base));
+      passage.querySelectorAll('.w').forEach((b) => b.classList.toggle('picked', picked.has(find(b.dataset.key).base)));
 
       const tbody = $('#book');
       tbody.textContent = '';
       words.forEach((x, idx) => {
         const tr = document.createElement('tr');
         const no = document.createElement('td'); no.className = 'no'; no.textContent = idx + 1;
-        const en = document.createElement('td'); en.className = 'en'; en.textContent = x.w;
+        const en = document.createElement('td'); en.className = 'en'; en.textContent = x.base;
         if (x.base !== x.w) {
-          const s = document.createElement('span'); s.className = 'base'; s.textContent = `원형: ${x.base}`;
+          const s = document.createElement('span'); s.className = 'base'; s.textContent = `지문: ${x.w}`;
           en.append(s);
         }
         const dl = document.createElement('a');
@@ -3665,8 +3700,8 @@ zoo=동물원
         [`${title} 단어장`],
         [name ? `이름: ${name}` : ''],
         [],
-        ['번호', '영어', '원형', '한국어 뜻'],
-        ...words.map((x, i) => [i + 1, x.w, x.base !== x.w ? x.base : '', x.m]),
+        ['번호', '영어(원형)', '지문 속 형태', '한국어 뜻'],
+        ...words.map((x, i) => [i + 1, x.base, x.base !== x.w ? x.w : '', x.m]),
       ];
       downloadBlob(makeXlsx(rows, [6, 20, 18, 45]), fileBase() + '.xlsx');
     });
