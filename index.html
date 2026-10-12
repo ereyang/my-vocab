@@ -3138,7 +3138,9 @@ zoo=동물원
       const text = $('#tText').value.trim();
       if (!text) { alert('영어 지문을 먼저 붙여넣어 주세요.'); return ''; }
       return '다음 영어 지문에 나오는 모든 단어(a, the, is 같은 기본 단어 포함)의 한국어 뜻을 이 지문의 문맥에 맞게 정리해 줘.\n'
-        + '형식: 한 줄에 하나씩 "영어 단어 = 한국어 뜻" (지문에 나온 형태 그대로, 같은 단어는 한 번만, 설명·번호·표 없이)\n\n' + text;
+        + '형식: 한 줄에 하나씩 "영어 단어 = 한국어 뜻" (지문에 나온 형태 그대로, 같은 단어는 한 번만, 설명·번호·표 없이)\n'
+        + '지문은 맨 끝에 [지문 끝] 표시가 있어. 이 표시가 보이지 않으면 목록을 만들지 말고 "지문이 잘렸어요"라고만 답해 줘.\n\n'
+        + text + '\n\n[지문 끝]';
     };
     const setAskHint = (msg) => {
       $('#askHint').textContent = msg;
@@ -3156,7 +3158,7 @@ zoo=동물원
       const url = base + encodeURIComponent(prompt);
       if (url.length <= 7000) {
         window.open(url, '_blank', 'noopener');
-        setAskHint('새 탭에 요청이 들어갔어요. 전송이 안 됐다면 Enter를 누르세요. 답으로 받은 목록을 위 칸에 붙여넣으면 끝!');
+        setAskHint('새 탭에 요청이 들어갔어요. 메시지 맨 끝에 [지문 끝]이 보이면 지문이 다 들어간 거예요. 답으로 받은 목록을 위 칸에 붙여넣으면 끝!');
       } else {
         window.open(base.split('?')[0], '_blank', 'noopener');
         setAskHint(copied
