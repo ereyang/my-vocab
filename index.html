@@ -131,6 +131,11 @@
   .meaning { min-height: 1.6em; border-radius: 4px; padding: 0 4px; outline: none; }
   .meaning:focus { background: var(--hover); }
   .meaning:empty::before { content: "뜻 없음 · 눌러서 입력"; color: var(--danger); font-size: .85rem; }
+  .meaning.loading:empty::before { content: "외부 사전에서 찾는 중…"; color: var(--muted); }
+  .src { display: inline-block; font-size: .72rem; color: var(--muted); border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-top: 2px; }
+  .src[hidden] { display: none; }
+  .src.teacher { color: var(--accent); border-color: var(--accent); }
+  .dictlink { display: inline-block; font-size: .75rem; font-weight: 400; font-family: inherit; color: var(--accent); margin-top: 2px; }
   td.del { width: 2.5em; text-align: right; }
   td.del button { padding: 2px 8px; border: none; background: none; color: var(--muted); font-size: 1.1rem; }
   #empty { color: var(--muted); text-align: center; padding: 24px 0; }
@@ -153,6 +158,7 @@
     th, td { border-bottom: 1px solid #999; color: #000; }
     .base { color: #555; }
     .meaning:empty::before { content: ""; }
+    .src, .dictlink { display: none !important; }
     tr { break-inside: avoid; }
   }
 </style>
@@ -179,6 +185,12 @@
     <label for="tText">영어 지문</label>
     <textarea id="tText" placeholder="학생들에게 보여 줄 영어 지문을 붙여넣으세요."></textarea>
     <p class="hint" id="lenHint"></p>
+    <label for="tGloss">선생님 단어 뜻 목록 <span style="font-weight:400;color:var(--muted)">(선택 · 한 줄에 하나씩 "단어 = 문맥상 뜻")</span></label>
+    <textarea id="tGloss" style="min-height:160px" placeholder="bank = 둑, 강기슭&#10;resilient = 회복력 있는&#10;found = 찾았다"></textarea>
+    <p class="hint" id="glossHint">학생이 이 목록에 있는 단어를 누르면 선생님 뜻이 가장 먼저 나와요. 목록에 없는 단어는 내장 사전 → 외부 사전 순으로 찾아요.</p>
+    <div class="row">
+      <button id="copyPrompt">ChatGPT·Claude에 물어볼 문장 복사</button>
+    </div>
     <div class="row">
       <button id="makeLink" class="primary">학생용 링크 만들기</button>
     </div>
@@ -210,7 +222,7 @@
         <tbody id="book"></tbody>
       </table>
       <p id="empty">아직 고른 단어가 없어요.</p>
-      <p class="hint">뜻은 눌러서 고칠 수 있어요. 단어장은 이 기기의 브라우저에 자동 저장됩니다.</p>
+      <p class="hint">뜻은 눌러서 고칠 수 있어요. 내장 사전에 없는 단어는 외부 사전(자동 번역)에서 찾아 주고, [사전]을 누르면 네이버 영어사전에서 확인할 수 있어요. 단어장은 이 기기의 브라우저에 자동 저장됩니다.</p>
     </div>
   </section>
 </main>
@@ -2965,8 +2977,26 @@ zoo=동물원
     return word.toLowerCase().replace(/’/g, "'").replace(/'s$|'$/, '');
   }
 
-  // 원형 후보를 차례로 사전에서 찾는다
-  function lookup(word) {
+  // 원형 후보를 차례로 찾는다: 선생님 목록 → 내장 사전
+  function lookup(word, gloss) {
+    const cands = candidates(word);
+    for (const c of cands) if (gloss && gloss.has(c)) return { base: c, meaning: gloss.get(c), src: 'teacher' };
+    for (const c of cands) if (DICT.has(c)) return { base: c, meaning: DICT.get(c), src: 'dict' };
+    return { base: cands[0], meaning: '', src: '' };
+  }
+
+  // 선생님 목록: "단어 = 뜻" (=, 탭, :, - 구분 모두 허용)
+  function parseGloss(str) {
+    const map = new Map();
+    (str || '').split(/\r?\n/).forEach((line) => {
+      const m = line.match(/^\s*[-*•\d.)\s]*([A-Za-z][A-Za-z'’ -]*?)\s*(?:=|\t|:|\s-\s|–|—)\s*(.+?)\s*$/);
+      if (m) map.set(normalize(m[1].trim()), m[2]);
+    });
+    return map;
+  }
+
+  // 단어 → 원형 후보 목록 (자기 자신이 먼저)
+  function candidates(word) {
     const w = normalize(word);
     const cands = [w];
     const add = (x) => { if (x && x.length > 1) cands.push(x); };
@@ -2984,8 +3014,7 @@ zoo=동물원
     if (w.endsWith('est')) { add(w.slice(0, -3)); add(w.slice(0, -2)); undouble(w.slice(0, -3)); }
     if (w.endsWith('ily')) add(w.slice(0, -3) + 'y');
     if (w.endsWith('ly')) add(w.slice(0, -2));
-    for (const c of cands) if (DICT.has(c)) return { base: c, meaning: DICT.get(c) };
-    return { base: w, meaning: '' };
+    return cands;
   }
 
   // ---------- 저장소 (접근 실패해도 동작하도록) ----------
@@ -2994,6 +3023,27 @@ zoo=동물원
     set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} },
     del(k) { try { localStorage.removeItem(k); } catch {} },
   };
+
+  // ---------- 외부 사전 ----------
+  // 내장 사전에 없는 단어는 MyMemory 무료 번역(키 불필요)으로 한국어 뜻을 찾는다.
+  // 결과는 브라우저에 캐시해서 같은 단어를 다시 묻지 않는다.
+  const extCache = store.get('vocab.v1.ext') || {};
+  async function lookupExternal(word) {
+    if (word in extCache) return extCache[word];
+    try {
+      const res = await fetch('https://api.mymemory.translated.net/get?langpair=en|ko&q=' + encodeURIComponent(word));
+      const j = await res.json();
+      const t = ((j.responseData && j.responseData.translatedText) || '').trim();
+      // 번역이 안 됐거나(영어 그대로), 경고 문구·긴 문장이 오면 버린다
+      const ok = Number(j.responseStatus) === 200 && t && !/[A-Za-z]{3,}/.test(t) && t.length <= 40;
+      extCache[word] = ok ? t : '';
+      store.set('vocab.v1.ext', extCache);
+      return extCache[word];
+    } catch {
+      return ''; // 오프라인 등: 캐시하지 않고 빈 뜻으로 둔다
+    }
+  }
+  const naverLink = (word) => 'https://en.dict.naver.com/#/search?query=' + encodeURIComponent(word);
 
   // ---------- 링크 인코딩: 지문을 주소(#p=...) 안에 담는다 ----------
   function toB64(bytes) {
@@ -3033,23 +3083,40 @@ zoo=동물원
     const draft = store.get('vocab.v1.draft') || {};
     $('#tTitle').value = draft.title || '';
     $('#tText').value = draft.text || '';
+    $('#tGloss').value = draft.gloss || '';
     let link = '';
 
     const saveDraft = () => {
-      store.set('vocab.v1.draft', { title: $('#tTitle').value, text: $('#tText').value });
+      store.set('vocab.v1.draft', { title: $('#tTitle').value, text: $('#tText').value, gloss: $('#tGloss').value });
       $('#linkArea').classList.add('hidden');
-      const n = $('#tText').value.length;
-      $('#lenHint').textContent = n ? `${n.toLocaleString()}자` + (n > 6000 ? ' · 지문이 길어서 링크가 매우 길어질 수 있어요.' : '') : '';
+      const n = $('#tText').value.length + $('#tGloss').value.length;
+      $('#lenHint').textContent = n ? `${$('#tText').value.length.toLocaleString()}자` + (n > 6000 ? ' · 지문과 목록이 길어서 링크가 매우 길어질 수 있어요.' : '') : '';
+      const g = parseGloss($('#tGloss').value).size;
+      $('#glossHint').textContent = g
+        ? `단어 ${g}개가 인식됐어요. 학생이 이 단어를 누르면 선생님 뜻이 먼저 나와요.`
+        : '학생이 이 목록에 있는 단어를 누르면 선생님 뜻이 가장 먼저 나와요. 목록에 없는 단어는 내장 사전 → 외부 사전 순으로 찾아요.';
     };
     $('#tTitle').addEventListener('input', saveDraft);
     $('#tText').addEventListener('input', saveDraft);
+    $('#tGloss').addEventListener('input', saveDraft);
     saveDraft();
+
+    $('#copyPrompt').addEventListener('click', async () => {
+      const text = $('#tText').value.trim();
+      if (!text) { alert('영어 지문을 먼저 붙여넣어 주세요.'); return; }
+      const prompt = '다음 영어 지문에서 중고등학생이 모를 만한 단어를 모두 골라, 이 지문의 문맥에 맞는 한국어 뜻을 정리해 줘.\n'
+        + '형식: 한 줄에 하나씩 "영어 단어 = 한국어 뜻" (지문에 나온 형태 그대로, 설명·번호·표 없이)\n\n' + text;
+      try { await navigator.clipboard.writeText(prompt); } catch { prompt && window.prompt('아래 내용을 복사하세요', prompt); return; }
+      $('#copyPrompt').textContent = '복사됨 ✓ — ChatGPT·Claude에 붙여넣고, 답을 위 칸에 붙여넣으세요';
+      setTimeout(() => { $('#copyPrompt').textContent = 'ChatGPT·Claude에 물어볼 문장 복사'; }, 4000);
+    });
 
     $('#makeLink').addEventListener('click', async () => {
       const text = $('#tText').value.trim();
       if (!text) { alert('영어 지문을 먼저 붙여넣어 주세요.'); return; }
       const title = $('#tTitle').value.trim() || "Today's Text";
-      link = location.href.split('#')[0] + '#p=' + (await encode({ title, text }));
+      const gloss = $('#tGloss').value.trim();
+      link = location.href.split('#')[0] + '#p=' + (await encode(gloss ? { title, text, gloss } : { title, text }));
       $('#linkBox').textContent = link;
       $('#linkArea').classList.remove('hidden');
     });
@@ -3068,7 +3135,8 @@ zoo=동물원
   }
 
   // ---------- 학생 화면 ----------
-  function startStudent({ title, text }) {
+  function startStudent({ title, text, gloss: glossText }) {
+    const gloss = parseGloss(glossText);
     $('#student').classList.remove('hidden');
     $('#studentTools').classList.remove('hidden');
     document.title = `${title} · 내 맘대로 단어장`;
@@ -3103,11 +3171,24 @@ zoo=동물원
       const k = b.dataset.key;
       const i = words.findIndex((x) => x.w === k);
       if (i >= 0) words.splice(i, 1);
-      else { const r = lookup(k); words.push({ w: k, base: r.base, m: r.meaning }); }
+      else {
+        const r = lookup(k, gloss);
+        const x = { w: k, base: r.base, m: r.meaning, src: r.src };
+        words.push(x);
+        if (!x.m) fillExternal(x);
+      }
       save(); render();
     });
 
-    function save() { store.set(key, words); }
+    function save() { store.set(key, words.map(({ loading, ...x }) => x)); }
+
+    async function fillExternal(x) {
+      x.loading = true;
+      const m = await lookupExternal(x.base);
+      x.loading = false;
+      if (m && !x.m) { x.m = m; x.src = 'ext'; }
+      save(); render();
+    }
 
     function updatePrintTitle() {
       const name = nameInput.value.trim();
@@ -3128,12 +3209,20 @@ zoo=동물원
           const s = document.createElement('span'); s.className = 'base'; s.textContent = `원형: ${x.base}`;
           en.append(s);
         }
+        const dl = document.createElement('a');
+        dl.className = 'dictlink'; dl.href = naverLink(x.base); dl.target = '_blank'; dl.rel = 'noopener';
+        dl.textContent = '사전 ↗'; dl.title = '네이버 영어사전에서 보기';
+        en.append(document.createElement('br'), dl);
         const ko = document.createElement('td');
         const mt = document.createElement('div');
-        mt.className = 'meaning'; mt.contentEditable = 'true'; mt.textContent = x.m;
-        mt.addEventListener('input', () => { x.m = mt.textContent.trim(); save(); });
+        mt.className = 'meaning' + (x.loading ? ' loading' : ''); mt.contentEditable = 'true'; mt.textContent = x.m;
+        const tag = document.createElement('span');
+        tag.className = 'src' + (x.src === 'teacher' ? ' teacher' : '');
+        tag.textContent = x.src === 'teacher' ? '✔ 선생님 뜻' : '외부 사전(자동 번역) · 확인 필요';
+        tag.hidden = x.src !== 'ext' && x.src !== 'teacher';
+        mt.addEventListener('input', () => { x.m = mt.textContent.trim(); x.src = 'me'; tag.hidden = true; save(); });
         mt.addEventListener('blur', () => { if (!x.m) mt.textContent = ''; });
-        ko.append(mt);
+        ko.append(mt, tag);
         const del = document.createElement('td'); del.className = 'del';
         const db = document.createElement('button'); db.type = 'button'; db.textContent = '✕'; db.title = '삭제';
         db.addEventListener('click', () => { words = words.filter((y) => y !== x); save(); render(); });
@@ -3154,6 +3243,8 @@ zoo=동물원
 
     updatePrintTitle();
     render();
+    // 지난번에 외부 사전을 못 찾고 끝난 단어는 다시 찾아본다
+    words.filter((x) => !x.m && !x.src).forEach(fillExternal);
   }
 
   // ---------- 시작 ----------
