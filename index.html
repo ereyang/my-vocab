@@ -152,6 +152,18 @@
   .plist li.editing .open { font-weight: 700; color: var(--accent); }
   #backHome { color: var(--accent); text-decoration: none; font-weight: 600; }
 
+  /* 지문 탭 */
+  .tabs { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
+  .tabs a {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--panel); color: var(--text);
+    text-decoration: none; font-size: .95rem;
+  }
+  .tabs a:hover { background: var(--hover); }
+  .tabs a.active { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
+  .tabs .badge { font-size: .75rem; opacity: .8; }
+
   @media (max-width: 800px) {
     #student { grid-template-columns: 1fr; }
     #bookPanel { position: static; max-height: none; }
@@ -161,7 +173,7 @@
   @media print {
     @page { margin: 15mm; }
     body { background: #fff; color: #000; }
-    header, #teacher, #passagePanel, td.del, th.del, #count, #bookPanel > h2, .hint { display: none !important; }
+    header, #teacher, #passagePanel, #tabs, td.del, th.del, #count, #bookPanel > h2, .hint { display: none !important; }
     main { padding: 0; max-width: none; }
     #student { display: block; }
     #bookPanel { border: none; padding: 0; position: static; max-height: none; overflow: visible; }
@@ -237,6 +249,9 @@
     <p class="hint" style="margin:0 0 12px">지문을 누르면 모르는 단어를 골라 나만의 단어장을 만들 수 있어요.</p>
     <ul id="homeList" class="plist"></ul>
   </section>
+
+  <!-- 학생: 지문 탭 -->
+  <nav id="tabs" class="tabs hidden" aria-label="지문 고르기"></nav>
 
   <!-- 학생 화면 -->
   <section id="student" class="hidden">
@@ -3192,17 +3207,58 @@ zoo=동물원
     }
   }
 
+  // 위쪽 탭: 모든 지문을 보여 주고, 누르면 그 지문으로 바꾼다
+  function renderTabs(list, activeId) {
+    const nav = $('#tabs');
+    nav.textContent = '';
+    list.forEach((p) => {
+      const a = document.createElement('a');
+      a.href = '#s=' + encodeURIComponent(p.id);
+      a.textContent = p.title;
+      if (p.id === activeId) { a.className = 'active'; a.setAttribute('aria-current', 'page'); }
+      const n = (store.get('vocab.v1.book.id.' + p.id) || []).length;
+      if (n) { const b = document.createElement('span'); b.className = 'badge'; b.textContent = `${n}개`; a.append(b); }
+      nav.append(a);
+    });
+    nav.classList.toggle('hidden', list.length === 0);
+  }
+
+  function updateActiveTabBadge(n) {
+    const a = document.querySelector('#tabs a.active');
+    if (!a) return;
+    let b = a.querySelector('.badge');
+    if (!n) { if (b) b.remove(); return; }
+    if (!b) { b = document.createElement('span'); b.className = 'badge'; a.append(b); }
+    b.textContent = `${n}개`;
+  }
+
+  // 저장된 지문 하나를 연다. id가 없으면 첫 번째 지문.
+  // 탭을 바꿀 때 빨리 뜨도록 마지막으로 받은 목록(캐시)을 먼저 쓰고, 최신 목록은 뒤에서 받아 탭만 갱신한다.
   async function startSaved(id) {
     $('#passageTitle').textContent = '불러오는 중…';
     $('#student').classList.remove('hidden');
-    try {
-      const p = (await api.list()).find((x) => x.id === id);
-      if (!p) throw new Error('없음');
-      $('#backHome').classList.remove('hidden');
-      startStudent(p);
-    } catch {
-      $('#passageTitle').textContent = '지문을 찾을 수 없어요.';
-      $('#passage').innerHTML = '<a href="./">← 지문 목록으로 돌아가기</a>';
+    const cached = store.get('vocab.v1.passages');
+    let list;
+    try { list = cached && cached.length ? cached : await api.list(); }
+    catch { list = []; }
+
+    const p = list.find((x) => x.id === id) || (!id && list[0]);
+    if (!p) {
+      if (cached) { store.del('vocab.v1.passages'); location.reload(); return; } // 캐시가 오래됐을 수 있다
+      $('#student').classList.add('hidden');
+      startHome();
+      return;
+    }
+    renderTabs(list, p.id);
+    startStudent(p);
+
+    if (cached) {
+      api.list().then((fresh) => {
+        renderTabs(fresh, p.id);
+        const now = fresh.find((x) => x.id === p.id);
+        // 보고 있는 지문을 선생님이 고쳤으면 새 내용으로 다시 연다
+        if (!now || now.updated !== p.updated) location.reload();
+      }).catch(() => {});
     }
   }
 
@@ -3496,6 +3552,7 @@ zoo=동물원
       $('#empty').classList.toggle('hidden', words.length > 0);
       $('#count').textContent = words.length ? `${words.length}개` : '';
       $('#printBtn').disabled = words.length === 0;
+      updateActiveTabBadge(words.length);
     }
 
     // PDF로 저장할 때 기본 파일 이름은 문서 제목을 따른다 → "지문 제목 - 이름"
@@ -3527,8 +3584,8 @@ zoo=동물원
     }
     const isTeacher = new URLSearchParams(location.search).has('teacher');
     if (isTeacher || !API_URL) { startTeacher(); return; }    // 교사 화면: 주소 끝에 ?teacher
-    if (hash.startsWith('s=')) { startSaved(decodeURIComponent(hash.slice(2))); return; }
-    startHome();                                              // 학생 기본 화면: 지문 목록
+    // 학생 기본 화면: 첫 번째 지문 + 위쪽에 모든 지문 탭 (#s=id 로 특정 지문)
+    startSaved(hash.startsWith('s=') ? decodeURIComponent(hash.slice(2)) : '');
   })();
 })();
 </script>
