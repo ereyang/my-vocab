@@ -141,6 +141,17 @@
   #empty { color: var(--muted); text-align: center; padding: 24px 0; }
   #printTitle { display: none; }
 
+  /* 지문 목록 */
+  .plist { list-style: none; margin: 0; padding: 0; }
+  .plist li { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+  .plist li:last-child { border-bottom: none; }
+  .plist .open { flex: 1; text-align: left; border: none; background: none; padding: 14px 4px; font-size: 1.05rem; }
+  .plist .open:hover { background: var(--hover); }
+  .plist .meta { color: var(--muted); font-size: .8rem; margin-left: 6px; }
+  .plist .empty { color: var(--muted); padding: 16px 4px; }
+  .plist li.editing .open { font-weight: 700; color: var(--accent); }
+  #backHome { color: var(--accent); text-decoration: none; font-weight: 600; }
+
   @media (max-width: 800px) {
     #student { grid-template-columns: 1fr; }
     #bookPanel { position: static; max-height: none; }
@@ -167,6 +178,7 @@
 <header>
   <h1>📘 내 맘대로 단어장</h1>
   <div id="studentTools" class="row hidden" style="margin:0">
+    <a id="backHome" class="hidden" href="./">← 지문 목록</a>
     <div class="name-field">
       <span>이름</span>
       <input type="text" id="studentName" placeholder="이름 입력" autocomplete="off">
@@ -179,7 +191,17 @@
 <main>
   <!-- 교사 화면 -->
   <section id="teacher" class="panel hidden">
-    <h2>교사용: 지문 올리기</h2>
+    <div id="savedArea" class="hidden">
+      <h2>교사용: 저장된 지문 <span class="hint" style="font-weight:400">— 학생 화면 목록에 보이는 지문</span></h2>
+      <div class="name-field">
+        <span>교사 비밀번호</span>
+        <input type="password" id="tPw" autocomplete="current-password" style="width:180px">
+      </div>
+      <ul id="savedList" class="plist"></ul>
+      <div class="row"><button id="newPassage">+ 새 지문 쓰기</button></div>
+      <hr style="border:none;border-top:1px solid var(--line);margin:20px 0">
+    </div>
+    <h2 id="editorTitle">교사용: 지문 올리기</h2>
     <label for="tTitle">지문 제목</label>
     <input type="text" id="tTitle" placeholder="예: 3과 본문">
     <label for="tText">영어 지문</label>
@@ -195,8 +217,10 @@
     </div>
     <p class="hint" id="askHint">버튼을 누르면 지문과 요청 문장이 들어간 채로 새 탭이 열려요. 답으로 받은 목록을 위 칸에 붙여넣으세요.</p>
     <div class="row">
-      <button id="makeLink" class="primary">학생용 링크 만들기</button>
+      <button id="savePassage" class="primary hidden">💾 저장된 지문에 저장</button>
+      <button id="makeLink">학생용 링크 만들기</button>
     </div>
+    <p class="hint" id="saveHint"></p>
     <div id="linkArea" class="hidden">
       <div id="linkBox"></div>
       <div class="row">
@@ -205,6 +229,13 @@
       </div>
       <p class="hint">이 링크를 클래스룸·메신저 등으로 학생들에게 보내면, 모두 같은 지문을 보게 됩니다.</p>
     </div>
+  </section>
+
+  <!-- 학생: 지문 목록 -->
+  <section id="home" class="panel hidden" style="max-width:760px;margin:0 auto">
+    <h2>지문을 고르세요</h2>
+    <p class="hint" style="margin:0 0 12px">지문을 누르면 모르는 단어를 골라 나만의 단어장을 만들 수 있어요.</p>
+    <ul id="homeList" class="plist"></ul>
   </section>
 
   <!-- 학생 화면 -->
@@ -3100,6 +3131,84 @@ zoo=동물원
     return (h >>> 0).toString(36);
   }
 
+  // ---------- 저장된 지문 (선생님 Google Apps Script) ----------
+  // 선생님이 배포한 Apps Script 웹 앱 주소. 비어 있으면 저장된 지문 기능은 꺼지고 링크 방식만 쓴다.
+  const API_URL = '';
+
+  const api = {
+    // 모든 지문 [{id, title, text, gloss, updated}]. 실패하면 마지막으로 받은 목록(캐시)을 쓴다.
+    async list() {
+      try {
+        const res = await fetch(API_URL, { cache: 'no-store' });
+        const j = await res.json();
+        if (!j.ok) throw new Error(j.error || '불러오기 실패');
+        store.set('vocab.v1.passages', j.passages);
+        return j.passages;
+      } catch (e) {
+        const cached = store.get('vocab.v1.passages');
+        if (cached) return cached;
+        throw e;
+      }
+    },
+    // 교사용 요청 (save / delete / check). text/plain으로 보내야 Apps Script에서 CORS 문제가 없다.
+    async send(body) {
+      const res = await fetch(API_URL, { method: 'POST', body: JSON.stringify(body) });
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error || '저장 실패');
+      return j;
+    },
+  };
+
+  const sessionPw = {
+    get() { try { return sessionStorage.getItem('vocab.v1.pw') || ''; } catch { return ''; } },
+    set(v) { try { sessionStorage.setItem('vocab.v1.pw', v); } catch {} },
+  };
+
+  // ---------- 학생: 지문 목록 ----------
+  async function startHome() {
+    $('#home').classList.remove('hidden');
+    const ul = $('#homeList');
+    ul.innerHTML = '<li class="empty">지문 목록을 불러오는 중…</li>';
+    try {
+      const list = await api.list();
+      ul.textContent = '';
+      if (!list.length) { ul.innerHTML = '<li class="empty">아직 올라온 지문이 없어요.</li>'; return; }
+      list.forEach((p) => {
+        const li = document.createElement('li');
+        const a = document.createElement('a');
+        a.className = 'open'; a.href = '#s=' + encodeURIComponent(p.id);
+        a.style.cssText = 'color:inherit;text-decoration:none;display:block';
+        a.textContent = p.title;
+        const n = store.get('vocab.v1.book.id.' + p.id);
+        if (n && n.length) {
+          const s = document.createElement('span'); s.className = 'meta'; s.textContent = `내 단어 ${n.length}개`;
+          a.append(s);
+        }
+        li.append(a);
+        ul.append(li);
+      });
+    } catch {
+      ul.innerHTML = '<li class="empty">지문 목록을 불러오지 못했어요. 인터넷 연결을 확인하고 새로고침해 주세요.</li>';
+    }
+  }
+
+  async function startSaved(id) {
+    $('#passageTitle').textContent = '불러오는 중…';
+    $('#student').classList.remove('hidden');
+    try {
+      const p = (await api.list()).find((x) => x.id === id);
+      if (!p) throw new Error('없음');
+      $('#backHome').classList.remove('hidden');
+      startStudent(p);
+    } catch {
+      $('#passageTitle').textContent = '지문을 찾을 수 없어요.';
+      $('#passage').innerHTML = '<a href="./">← 지문 목록으로 돌아가기</a>';
+    }
+  }
+
+  // 목록 ↔ 지문 화면 이동은 주소(#)만 바뀌므로 새로 그린다
+  window.addEventListener('hashchange', () => location.reload());
+
   // ---------- 교사 화면 ----------
   function startTeacher() {
     $('#teacher').classList.remove('hidden');
@@ -3108,9 +3217,10 @@ zoo=동물원
     $('#tText').value = draft.text || '';
     $('#tGloss').value = draft.gloss || '';
     let link = '';
+    let editingId = draft.id || ''; // 저장된 지문을 고치는 중이면 그 id
 
     const saveDraft = () => {
-      store.set('vocab.v1.draft', { title: $('#tTitle').value, text: $('#tText').value, gloss: $('#tGloss').value });
+      store.set('vocab.v1.draft', { id: editingId, title: $('#tTitle').value, text: $('#tText').value, gloss: $('#tGloss').value });
       $('#linkArea').classList.add('hidden');
       const n = $('#tText').value.length + $('#tGloss').value.length;
       $('#lenHint').textContent = n ? `${$('#tText').value.length.toLocaleString()}자` + (n > 6000 ? ' · 지문과 목록이 길어서 링크가 매우 길어질 수 있어요.' : '') : '';
@@ -3191,17 +3301,111 @@ zoo=동물원
       setTimeout(() => { $('#copyLink').textContent = '링크 복사'; }, 1500);
     });
     $('#openLink').addEventListener('click', () => window.open(link, '_blank'));
+
+    if (API_URL) setupSaved();
+
+    // ----- 저장된 지문 관리 (Google 시트) -----
+    function setupSaved() {
+      $('#savedArea').classList.remove('hidden');
+      $('#savePassage').classList.remove('hidden');
+      const pw = $('#tPw');
+      pw.value = sessionPw.get();
+      pw.addEventListener('input', () => sessionPw.set(pw.value));
+
+      const ul = $('#savedList');
+      let list = [];
+      const setSave = (msg) => { $('#saveHint').textContent = msg; };
+      const hasContent = () => $('#tTitle').value.trim() || $('#tText').value.trim() || $('#tGloss').value.trim();
+      const needPw = () => {
+        if (pw.value) return pw.value;
+        alert('교사 비밀번호를 먼저 입력해 주세요.'); pw.focus(); return '';
+      };
+
+      function showEditing() {
+        const cur = list.find((p) => p.id === editingId);
+        $('#editorTitle').textContent = cur ? `지문 고치기: ${cur.title}` : '새 지문 쓰기';
+        ul.querySelectorAll('li').forEach((li) => li.classList.toggle('editing', li.dataset.id === editingId));
+      }
+
+      function renderList() {
+        ul.textContent = '';
+        if (!list.length) { ul.innerHTML = '<li class="empty">아직 저장된 지문이 없어요. 아래에서 지문을 쓰고 [저장된 지문에 저장]을 누르세요.</li>'; }
+        list.forEach((p) => {
+          const li = document.createElement('li'); li.dataset.id = p.id;
+          const open = document.createElement('button'); open.type = 'button'; open.className = 'open';
+          open.textContent = p.title;
+          const s = document.createElement('span'); s.className = 'meta';
+          s.textContent = `단어 뜻 ${parseGloss(p.gloss).size}개`;
+          open.append(s);
+          open.addEventListener('click', () => {
+            if (editingId !== p.id && hasContent() && !confirm('지금 쓰고 있는 내용 대신 이 지문을 불러올까요?')) return;
+            editingId = p.id;
+            $('#tTitle').value = p.title; $('#tText').value = p.text; $('#tGloss').value = p.gloss;
+            saveDraft(); showEditing(); setSave('');
+            $('#editorTitle').scrollIntoView({ behavior: 'smooth' });
+          });
+          const del = document.createElement('button'); del.type = 'button'; del.className = 'danger'; del.textContent = '삭제';
+          del.addEventListener('click', async () => {
+            const password = needPw(); if (!password) return;
+            if (!confirm(`"${p.title}" 지문을 삭제할까요? 학생 목록에서도 사라져요.`)) return;
+            del.disabled = true;
+            try {
+              await api.send({ action: 'delete', password, id: p.id });
+              if (editingId === p.id) { editingId = ''; saveDraft(); }
+              await refresh();
+              setSave(`"${p.title}" 지문을 삭제했어요.`);
+            } catch (e) { alert(e.message); del.disabled = false; }
+          });
+          li.append(open, del);
+          ul.append(li);
+        });
+        showEditing();
+      }
+
+      async function refresh() {
+        try { list = await api.list(); renderList(); }
+        catch { ul.innerHTML = '<li class="empty">저장된 지문을 불러오지 못했어요. 새로고침해 주세요.</li>'; }
+      }
+
+      $('#newPassage').addEventListener('click', () => {
+        if (hasContent() && !confirm('지금 쓰고 있는 내용을 비우고 새 지문을 쓸까요?')) return;
+        editingId = '';
+        $('#tTitle').value = ''; $('#tText').value = ''; $('#tGloss').value = '';
+        saveDraft(); showEditing(); setSave('');
+        $('#tTitle').focus();
+      });
+
+      $('#savePassage').addEventListener('click', async () => {
+        const title = $('#tTitle').value.trim();
+        const text = $('#tText').value.trim();
+        if (!title) { alert('지문 제목을 입력해 주세요. 학생 목록과 PDF 파일 이름에 쓰여요.'); $('#tTitle').focus(); return; }
+        if (!text) { alert('영어 지문을 먼저 붙여넣어 주세요.'); return; }
+        const password = needPw(); if (!password) return;
+        const btn = $('#savePassage'); btn.disabled = true; setSave('저장하는 중…');
+        try {
+          const j = await api.send({ action: 'save', password, id: editingId, title, text, gloss: $('#tGloss').value.trim() });
+          editingId = j.id; saveDraft();
+          await refresh();
+          setSave(`저장됐어요 ✓ 학생 화면(${location.origin + location.pathname}) 목록에 바로 보여요.`);
+        } catch (e) { setSave(''); alert(e.message); }
+        btn.disabled = false;
+      });
+
+      ul.innerHTML = '<li class="empty">불러오는 중…</li>';
+      refresh();
+    }
   }
 
   // ---------- 학생 화면 ----------
-  function startStudent({ title, text, gloss: glossText }) {
+  function startStudent({ id, title, text, gloss: glossText }) {
     const gloss = parseGloss(glossText);
     $('#student').classList.remove('hidden');
     $('#studentTools').classList.remove('hidden');
     document.title = `${title} · 내 맘대로 단어장`;
     $('#passageTitle').textContent = title;
 
-    const key = 'vocab.v1.book.' + hashOf(title + '\n' + text);
+    // 저장된 지문은 id별로, 링크 지문은 내용별로 단어장을 따로 보관한다
+    const key = id ? 'vocab.v1.book.id.' + id : 'vocab.v1.book.' + hashOf(title + '\n' + text);
     let words = store.get(key) || []; // [{w, base, m}]
 
     const nameInput = $('#studentName');
@@ -3294,7 +3498,15 @@ zoo=동물원
       $('#printBtn').disabled = words.length === 0;
     }
 
-    $('#printBtn').addEventListener('click', () => { updatePrintTitle(); window.print(); });
+    // PDF로 저장할 때 기본 파일 이름은 문서 제목을 따른다 → "지문 제목 - 이름"
+    $('#printBtn').addEventListener('click', () => {
+      updatePrintTitle();
+      const name = nameInput.value.trim();
+      const before = document.title;
+      document.title = (title + (name ? ` - ${name}` : '')).replace(/[\\/:*?"<>|]/g, ' ');
+      window.print();
+      setTimeout(() => { document.title = before; }, 1000);
+    });
     $('#resetBtn').addEventListener('click', () => {
       if (!confirm('이 지문에서 고른 단어를 모두 지울까요?')) return;
       words = []; store.del(key); render();
@@ -3313,7 +3525,10 @@ zoo=동물원
       try { startStudent(await decode(hash.slice(2))); return; }
       catch { alert('링크가 올바르지 않아요. 선생님께 링크를 다시 받아 주세요.'); }
     }
-    startTeacher();
+    const isTeacher = new URLSearchParams(location.search).has('teacher');
+    if (isTeacher || !API_URL) { startTeacher(); return; }    // 교사 화면: 주소 끝에 ?teacher
+    if (hash.startsWith('s=')) { startSaved(decodeURIComponent(hash.slice(2))); return; }
+    startHome();                                              // 학생 기본 화면: 지문 목록
   })();
 })();
 </script>
