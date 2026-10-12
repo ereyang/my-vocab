@@ -8,8 +8,9 @@
  * 그러면 학생 본인의 계정으로 실행되어, 학생 드라이브에 단어장 시트가 만들어진다.
  *
  * 단어장 앱이 ?d=(gzip+base64url JSON) 또는 ?p=(base64url JSON) 으로
- * { title, name, file, rows: [[영어, 한국어 뜻], ...] } 를 보낸다.
- * 같은 파일 이름으로 다시 보내면 새로 만들지 않고 같은 시트를 최신 내용으로 바꾼다.
+ * { title, name, book, rows: [[영어, 한국어 뜻], ...] } 를 보낸다.
+ * 학생마다 시트 파일 하나("홍길동 단어장")에 지문별 탭을 만든다.
+ * 같은 지문을 다시 보내면 그 탭만 최신 내용으로 바뀐다.
  */
 
 function doGet(e) {
@@ -25,17 +26,26 @@ function doGet(e) {
     return page_('오류', '<p>단어장 내용을 읽지 못했어요. 단어장 앱에서 다시 눌러 주세요.</p>');
   }
 
-  const fileName = clean_(data.file || '내 단어장', 100);
   const title = clean_(data.title || '', 200);
   const name = clean_(data.name || '', 30);
+  const fileName = clean_(data.book || (name ? name + ' 단어장' : '내 단어장'), 100);
+  const tabName = tabName_(title || '단어장');
   const rows = (Array.isArray(data.rows) ? data.rows : []).slice(0, 1000).map(function (r) {
     return [text_(clean_(r[0], 200)), text_(clean_(r[1], 500))];
   });
 
   const ss = openOrCreate_(fileName);
-  const sh = ss.getSheets()[0];
+  let sh = ss.getSheetByName(tabName);
+  if (!sh) {
+    const sheets = ss.getSheets();
+    // 새 파일의 빈 기본 탭('시트1')은 첫 지문 탭으로 쓴다
+    if (sheets.length === 1 && sheets[0].getLastRow() === 0) {
+      sh = sheets[0].setName(tabName);
+    } else {
+      sh = ss.insertSheet(tabName, sheets.length);
+    }
+  }
   sh.clear();
-  sh.setName('단어장');
 
   const values = [
     [text_(title + ' 단어장'), ''],
@@ -51,18 +61,23 @@ function doGet(e) {
   sh.setFrozenRows(4);
   SpreadsheetApp.flush();
 
-  const url = ss.getUrl();
+  const url = ss.getUrl() + '#gid=' + sh.getSheetId(); // 방금 채운 탭으로 바로 열기
   return page_('단어장 시트 완성', ''
-    + '<p style="font-size:18px">✅ <b>' + esc_(fileName) + '</b> 시트에 단어 ' + rows.length + '개를 넣었어요.</p>'
+    + '<p style="font-size:18px">✅ <b>' + esc_(fileName) + '</b>의 <b>' + esc_(tabName) + '</b> 탭에 단어 ' + rows.length + '개를 넣었어요.</p>'
     + '<p><a href="' + esc_(url) + '" target="_top" style="display:inline-block;padding:14px 22px;background:#1a73e8;color:#fff;'
     + 'border-radius:10px;text-decoration:none;font-size:18px;font-weight:bold">내 구글 시트 열기</a></p>'
     + '<p style="color:#666">내 구글 드라이브에 저장되어 언제든 열어 고칠 수 있어요. 이 탭은 닫아도 돼요.</p>');
 }
 
-// 학생별로 파일 이름 → 시트 id를 기억해 두고, 같은 이름이면 같은 시트를 다시 쓴다
+// 탭 이름에 못 쓰는 글자를 빼고 100자 이내로
+function tabName_(s) {
+  return String(s).replace(/[\[\]\*\?:\/\\']/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 100) || '단어장';
+}
+
+// 학생별로 파일 이름 → 시트 파일 id를 기억해 두고, 같은 이름이면 같은 파일을 다시 쓴다
 function openOrCreate_(fileName) {
   const props = PropertiesService.getUserProperties();
-  const key = 'sheet:' + fileName;
+  const key = 'book:' + fileName;
   const id = props.getProperty(key);
   if (id) {
     try { return SpreadsheetApp.openById(id); } catch (err) { /* 지워졌으면 새로 만든다 */ }

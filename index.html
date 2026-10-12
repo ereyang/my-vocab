@@ -3727,13 +3727,19 @@ zoo=동물원
       // 학생 계정으로 실행되는 Apps Script가 있으면: 학생 드라이브에 시트를 자동으로 만들어 채운다
       if (SHEETS_URL) {
         const win = window.open('', '_blank'); // 팝업 차단을 피하려고 클릭 직후 먼저 연다
-        const payload = JSON.stringify({ title, name: nameInput.value.trim(), file: fileBase(), rows: words.map((x) => [x.base, x.m]) });
+        const name = nameInput.value.trim();
+        const payload = JSON.stringify({
+          title, name,
+          book: name ? `${name} 단어장` : '내 단어장', // 학생마다 시트 파일 하나, 지문은 탭으로
+          file: fileBase(), // 예전 버전 Apps Script 호환
+          rows: words.map((x) => [x.base, x.m]),
+        });
         const url = SHEETS_URL + '?' + await packForUrl(payload);
         if (win) { win.opener = null; win.location.href = url; } else { location.href = url; }
         showExportHint([
           '✅ 새 탭에서 내 구글 시트를 만들고 있어요.',
           '처음 한 번은 학교 구글 계정을 고르고 [허용]을 눌러 주세요. (허용한 뒤 시트가 안 생기면 버튼을 한 번 더 누르세요)',
-          '완료되면 [내 구글 시트 열기]를 누르세요. 같은 지문은 다시 보내면 같은 시트가 최신 내용으로 바뀌어요.',
+          `완료되면 [내 구글 시트 열기]를 누르세요. "${name ? name + ' 단어장' : '내 단어장'}" 시트 하나에 지문마다 탭이 생기고, 같은 지문을 다시 보내면 그 탭이 최신 내용으로 바뀌어요.`,
         ]);
         return;
       }
