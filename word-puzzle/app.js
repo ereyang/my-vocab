@@ -871,6 +871,48 @@ Rules:
     m.classList.remove("pop"); void m.offsetWidth; m.classList.add("pop");
     $("#collected").insertAdjacentHTML("beforeend", `<li><b>${esc(it.word)}</b> · ${esc(it.meaning)} · ${esc(OBJECTS[it.object] || "")}</li>`);
     addObject(it);
+    popObject(it);
+  }
+
+  /* ---------- pop-up showcase: the new object appears big in the middle of the screen ---------- */
+  let POP = null;
+  function popObject(it) {
+    let box = $("#pop3d");
+    if (!box) {
+      box = document.createElement("div"); box.id = "pop3d"; box.className = "pop3d"; box.hidden = true; box.setAttribute("aria-live", "polite");
+      box.innerHTML = `<div class="pop-burst" aria-hidden="true"></div><canvas id="pop-canvas" width="360" height="360"></canvas><div class="pop-label" id="pop-label"></div>`;
+      document.body.append(box);
+    }
+    $("#pop-label").innerHTML = `<b>${esc(it.answer)}</b><span>${esc(it.meaning)} · ${esc(OBJECTS[it.object] || "")} 획득!</span>`;
+    if (window.THREE && !POP) {
+      try {
+        const renderer = new THREE.WebGLRenderer({ canvas: $("#pop-canvas"), antialias: true, alpha: true });
+        renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(360, 360, false);
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        const scene = new THREE.Scene();
+        scene.add(new THREE.HemisphereLight(0xffffff, 0x8796a8, 1.0));
+        const sun = new THREE.DirectionalLight(0xffffff, 0.9); sun.position.set(2, 4, 5); scene.add(sun);
+        const camera = new THREE.PerspectiveCamera(35, 1, 0.1, 50); camera.position.set(0, 0.9, 3.4); camera.lookAt(0, 0.5, 0);
+        POP = { renderer, scene, camera, obj: null, raf: 0, t0: 0 };
+      } catch { POP = false; }
+    }
+    if (POP) {
+      if (POP.obj) { POP.scene.remove(POP.obj); POP.obj.traverse((o) => { o.geometry?.dispose?.(); if (o.material) [].concat(o.material).forEach((m) => m.dispose()); }); }
+      POP.obj = normalize(buildObject(it.object)); POP.scene.add(POP.obj);
+      POP.t0 = performance.now(); cancelAnimationFrame(POP.raf);
+      const loop = (now) => {
+        const age = (now - POP.t0) / 1000;
+        const s = reduced() ? 1 : Math.max(0.001, easeOutBack(Math.min(1, age / 0.45)));
+        POP.obj.scale.setScalar(s); POP.obj.rotation.y = age * 3.2;
+        POP.obj.position.y = reduced() ? 0 : Math.sin(Math.min(1, age / 0.9) * Math.PI) * 0.12;
+        POP.renderer.render(POP.scene, POP.camera);
+        if (age < 2.2) POP.raf = requestAnimationFrame(loop);
+      };
+      POP.raf = requestAnimationFrame(loop);
+    }
+    box.classList.toggle("no3d", !POP);
+    box.hidden = false; box.classList.remove("show"); void box.offsetWidth; box.classList.add("show");
+    clearTimeout(box._t); box._t = setTimeout(() => { box.classList.remove("show"); box.hidden = true; }, reduced() ? 1400 : 1900);
   }
   function finish() {
     const n = G.items.length, miss = G.miss;

@@ -192,6 +192,19 @@ mark { background: var(--pop); color: var(--on-pop); border-radius: 4px; padding
 
 .notice { font-size: 14px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); color: var(--muted); margin: 0; }
 
+/* Pop-up showcase over the whole screen */
+.pop3d { position: fixed; left: 50%; top: 50%; z-index: 50; width: min(360px, 82vw); aspect-ratio: 1 / 1; max-width: 100%; transform: translate(-50%, -50%); pointer-events: none; display: grid; place-items: center; }
+.pop3d canvas { width: 100%; height: 100%; position: relative; z-index: 1; }
+.pop-burst { position: absolute; inset: 6%; border-radius: 50%; background: radial-gradient(circle, color-mix(in srgb, var(--pop) 70%, transparent) 0%, color-mix(in srgb, var(--pop) 25%, transparent) 45%, transparent 70%); }
+.pop-label { position: absolute; left: 50%; bottom: -6px; transform: translateX(-50%); z-index: 2; background: var(--ink); color: var(--bg); border-radius: 14px; padding: 8px 16px; text-align: center; white-space: nowrap; box-shadow: 0 8px 24px rgba(0,0,0,.25); display: flex; flex-direction: column; }
+.pop-label b { font: 800 24px var(--f-en); }
+.pop-label span { font-size: 14px; opacity: .85; }
+.pop3d.no3d .pop-label { bottom: auto; }
+.pop3d.show { animation: popIn 1.9s ease forwards; }
+.pop3d.show .pop-burst { animation: burst 1.9s ease-out forwards; }
+@keyframes popIn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(.6); } 12% { opacity: 1; transform: translate(-50%, -50%) scale(1.04); } 20% { transform: translate(-50%, -50%) scale(1); } 80% { opacity: 1; transform: translate(-50%, -50%) scale(1); } 100% { opacity: 0; transform: translate(-50%, -50%) scale(.85) translateY(30px); } }
+@keyframes burst { 0% { transform: scale(.3); opacity: 0; } 15% { transform: scale(1.1); opacity: 1; } 100% { transform: scale(1.3); opacity: 0; } }
+
 @media (max-width: 900px) {
   .setup-top, .stage, .stage.two { grid-template-columns: minmax(0, 1fr); }
 }
