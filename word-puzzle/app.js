@@ -210,7 +210,7 @@
         <div class="bank" id="bank"></div>
         <ol class="blanks" id="blanks"></ol>
       </article>
-      <article class="panel">
+      <article class="panel shelf-panel">
         <div class="panel-head"><h2>3D 진열장</h2><span class="hint" style="margin-left:auto">끌어서 돌려 보세요</span></div>
         <div class="three-host" id="three-host"><canvas id="three"></canvas><div class="three-empty" id="three-empty">빈칸을 맞히면 물건이 하나씩 나타나요.</div><div class="three-msg" id="three-msg"></div></div>
         <ul class="collected" id="collected"></ul>
@@ -856,38 +856,41 @@ Rules:
       G.filled.add(slotId); G.selChip = G.selSlot = null;
       chip.remove(); slot.textContent = G.items[slotId].answer; slot.classList.remove("target"); slot.classList.add("ok"); slot.disabled = true;
       slot.closest("li").classList.add("ok");
-      reveal(G.items[slotId]); updateBlankCount();
-      if (G.filled.size === G.items.length) setTimeout(finish, reduced() ? 200 : 1800);
+      reveal(G.items[slotId], slot); updateBlankCount();
+      if (G.filled.size === G.items.length) setTimeout(finish, reduced() ? 1100 : 2000);
     } else {
       G.miss++; updateMiss(); G.lock = true;
       chip.classList.add("no"); slot.classList.add("no");
       setTimeout(() => { chip.classList.remove("no", "sel"); slot.classList.remove("no", "target"); G.selChip = G.selSlot = null; G.lock = false; }, 450);
     }
   }
-  function reveal(it) {
-    $("#three-empty").hidden = true;
+  function reveal(it, slotEl) {
     const m = $("#three-msg");
     m.innerHTML = `<span class="big">${esc(it.answer)}</span>${esc(it.meaning)} → ${esc(OBJECTS[it.object] || "")}`;
-    m.classList.remove("pop"); void m.offsetWidth; m.classList.add("pop");
     $("#collected").insertAdjacentHTML("beforeend", `<li><b>${esc(it.word)}</b> · ${esc(it.meaning)} · ${esc(OBJECTS[it.object] || "")}</li>`);
-    addObject(it);
-    popObject(it);
+    const g = G;
+    popObject(it, slotEl, () => {
+      if (G !== g) return;
+      $("#three-empty").hidden = true;
+      m.classList.remove("pop"); void m.offsetWidth; m.classList.add("pop");
+      addObject(it);
+    });
   }
 
-  /* ---------- pop-up showcase: the new object appears big in the middle of the screen ---------- */
+  /* ---------- pop-up: bursts at the answered blank, then shrinks into the shelf ---------- */
   let POP = null;
-  function popObject(it) {
+  function popObject(it, fromEl, done) {
     let box = $("#pop3d");
     if (!box) {
       box = document.createElement("div"); box.id = "pop3d"; box.className = "pop3d"; box.hidden = true; box.setAttribute("aria-live", "polite");
-      box.innerHTML = `<div class="pop-burst" aria-hidden="true"></div><canvas id="pop-canvas" width="360" height="360"></canvas><div class="pop-label" id="pop-label"></div>`;
+      box.innerHTML = `<div class="pop-burst" aria-hidden="true"></div><canvas id="pop-canvas" width="280" height="280"></canvas><div class="pop-label" id="pop-label"></div>`;
       document.body.append(box);
     }
-    $("#pop-label").innerHTML = `<b>${esc(it.answer)}</b><span>${esc(it.meaning)} · ${esc(OBJECTS[it.object] || "")} 획득!</span>`;
-    if (window.THREE && !POP) {
+    $("#pop-label").innerHTML = `<b>${esc(it.answer)}</b><span>${esc(OBJECTS[it.object] || "")} 획득!</span>`;
+    if (window.THREE && POP === null) {
       try {
         const renderer = new THREE.WebGLRenderer({ canvas: $("#pop-canvas"), antialias: true, alpha: true });
-        renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(360, 360, false);
+        renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1)); renderer.setSize(280, 280, false);
         renderer.outputEncoding = THREE.sRGBEncoding;
         const scene = new THREE.Scene();
         scene.add(new THREE.HemisphereLight(0xffffff, 0x8796a8, 1.0));
@@ -902,17 +905,39 @@ Rules:
       POP.t0 = performance.now(); cancelAnimationFrame(POP.raf);
       const loop = (now) => {
         const age = (now - POP.t0) / 1000;
-        const s = reduced() ? 1 : Math.max(0.001, easeOutBack(Math.min(1, age / 0.45)));
-        POP.obj.scale.setScalar(s); POP.obj.rotation.y = age * 3.2;
-        POP.obj.position.y = reduced() ? 0 : Math.sin(Math.min(1, age / 0.9) * Math.PI) * 0.12;
+        POP.obj.scale.setScalar(reduced() ? 1 : Math.max(0.001, easeOutBack(Math.min(1, age / 0.4))));
+        POP.obj.rotation.y = age * 3.5;
         POP.renderer.render(POP.scene, POP.camera);
-        if (age < 2.2) POP.raf = requestAnimationFrame(loop);
+        if (age < 2) POP.raf = requestAnimationFrame(loop);
       };
       POP.raf = requestAnimationFrame(loop);
     }
     box.classList.toggle("no3d", !POP);
-    box.hidden = false; box.classList.remove("show"); void box.offsetWidth; box.classList.add("show");
-    clearTimeout(box._t); box._t = setTimeout(() => { box.classList.remove("show"); box.hidden = true; }, reduced() ? 1400 : 1900);
+    // start at the answered blank, end at the shelf
+    const vw = window.innerWidth, vh = window.innerHeight, size = Math.min(240, vw * 0.6);
+    const fr = (fromEl || $("#blanks")).getBoundingClientRect();
+    const sx = Math.min(vw - size / 2 - 8, Math.max(size / 2 + 8, fr.left + fr.width / 2));
+    const sy = Math.min(vh - size / 2 - 8, Math.max(size / 2 + 8, fr.top + fr.height / 2));
+    const tr = $("#three-host").getBoundingClientRect();
+    const tx = Math.min(vw, Math.max(0, tr.left + tr.width / 2)), ty = Math.min(vh + 40, Math.max(-40, tr.top + tr.height / 2));
+    box.style.width = box.style.height = size + "px";
+    box.style.left = sx + "px"; box.style.top = sy + "px";
+    box.hidden = false;
+    box._anim?.cancel(); clearTimeout(box._t);
+    const dx = tx - sx, dy = ty - sy;
+    const finishPop = () => { box.hidden = true; done && done(); };
+    if (reduced() || !box.animate) { box._t = setTimeout(finishPop, 900); return; }
+    const T = (x, y, s) => `translate(calc(-50% + ${x}px), calc(-50% + ${y}px)) scale(${s})`;
+    box._anim = box.animate([
+      { transform: T(0, 0, 0.3), opacity: 0, offset: 0 },
+      { transform: T(0, 0, 1.12), opacity: 1, offset: 0.14 },
+      { transform: T(0, 0, 1), opacity: 1, offset: 0.24 },
+      { transform: T(0, 0, 1), opacity: 1, offset: 0.62 },
+      { transform: T(dx, dy, 0.18), opacity: 0.85, offset: 1 },
+    ], { duration: 1700, easing: "ease-in-out" });
+    box._anim.onfinish = finishPop;
+    const burst = box.querySelector(".pop-burst");
+    burst.animate([{ transform: "scale(.3)", opacity: 0 }, { transform: "scale(1.25)", opacity: 1, offset: 0.16 }, { transform: "scale(1.5)", opacity: 0, offset: 0.55 }, { opacity: 0 }], { duration: 1700 });
   }
   function finish() {
     const n = G.items.length, miss = G.miss;
@@ -999,18 +1024,11 @@ Rules:
   }
   function animObj(o, t) {
     const age = t - o.t0; const slot = slotWorld(o);
-    const show = new THREE.Vector3(0, 0.5, T3.radius + 0.9);
-    o.holder.rotation.y = o.phase + t * 0.7 + (age < 1.6 ? age * 3 : 0);
-    if (reduced() || age > 2.4) { o.holder.position.copy(slot); o.holder.scale.setScalar(1); return; }
-    if (age < 1.6) {
-      const p = Math.min(1, age / 0.55);
-      o.holder.position.copy(show); o.holder.position.y += Math.sin(Math.min(1, age / 1.6) * Math.PI) * 0.15;
-      o.holder.scale.setScalar(Math.max(0.001, 1.6 * easeOutBack(p)));
-    } else {
-      const q = easeInOut((age - 1.6) / 0.8);
-      o.holder.position.lerpVectors(show, slot, q);
-      o.holder.scale.setScalar(1.6 + (1 - 1.6) * q);
-    }
+    o.holder.rotation.y = o.phase + t * 0.7;
+    o.holder.position.copy(slot);
+    if (reduced() || age > 0.6) { o.holder.scale.setScalar(1); return; }
+    o.holder.scale.setScalar(Math.max(0.001, easeOutBack(age / 0.6)));
+    o.holder.position.y += Math.sin((age / 0.6) * Math.PI) * 0.3;
   }
   function addObject(it) {
     if (!T3) return;
