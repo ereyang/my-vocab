@@ -433,11 +433,36 @@ ${draft.passage.trim().slice(0, 12000)}
   /* ---------- save to sheet ---------- */
   for (const id of ["#pw", "#pw2"]) { $(id).value = getPw(); $(id).addEventListener("input", (e) => { setPw(e.target.value); $("#pw").value = $("#pw2").value = e.target.value; }); }
   const studentLink = (id) => location.origin + location.pathname + "?set=" + encodeURIComponent(id);
+  function drawQR(el, url, px) {
+    el.innerHTML = "";
+    if (!window.QRCode) { el.textContent = "QR을 불러오지 못했어요."; return; }
+    try { new QRCode(el, { text: url, width: px, height: px, colorDark: "#000000", colorLight: "#FFFFFF", correctLevel: QRCode.CorrectLevel.M }); }
+    catch { el.textContent = "QR을 만들지 못했어요."; }
+  }
+  function showQRBig(url, title) {
+    let ov = $("#qr-big");
+    if (!ov) {
+      ov = document.createElement("div"); ov.id = "qr-big"; ov.className = "qr-big"; ov.hidden = true;
+      ov.innerHTML = `<div class="qr-big-card"><h2 class="qr-big-title" id="qr-big-title"></h2><div class="qr-img" id="qr-big-img"></div><p class="hint">카메라로 찍고, 이름을 적고 시작하세요.</p><code class="qr-big-url" id="qr-big-url"></code><button class="btn big" id="qr-big-close">닫기</button></div>`;
+      document.body.append(ov);
+      $("#qr-big-close").onclick = () => { ov.hidden = true; };
+      ov.addEventListener("click", (e) => { if (e.target === ov) ov.hidden = true; });
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape") ov.hidden = true; });
+    }
+    $("#qr-big-title").textContent = title || "낱말 조각 공방";
+    $("#qr-big-url").textContent = url;
+    drawQR($("#qr-big-img"), url, 900);
+    ov.hidden = false;
+  }
   function showLink(id) {
     const url = studentLink(id);
     const box = $("#linkbox"); box.hidden = false;
-    box.innerHTML = `<span class="lbl2">학생용 링크</span><code id="link-text">${esc(url)}</code><button class="btn small" id="copy-link">복사</button>`;
+    box.innerHTML = `<div class="qr-img small" id="qr-small"></div>
+      <div class="link-side"><span class="lbl2">학생용 링크</span><code id="link-text">${esc(url)}</code>
+      <div class="row"><button class="btn small" id="copy-link">링크 복사</button><button class="btn small primary" id="qr-open">QR 크게 보기</button></div></div>`;
+    drawQR($("#qr-small"), url, 360);
     $("#copy-link").onclick = async () => { const ok = await copyText(url); $("#copy-link").textContent = ok ? "복사했어요" : "길게 눌러 복사하세요"; };
+    $("#qr-open").onclick = () => showQRBig(url, draft.title);
   }
   $("#save").addEventListener("click", async () => {
     const set = validSet(draft); if (!set) return;
@@ -466,6 +491,7 @@ ${draft.passage.trim().slice(0, 12000)}
         <div class="set-info"><b>${esc(s.title)}</b><span class="hint">${esc(fmtTime(s.updated))} · 단어 ${s.words}개 · 제출 ${s.done}명</span></div>
         <div class="set-acts">
           <button class="btn small" data-act="roster">명단 보기</button>
+          <button class="btn small" data-act="qr">QR</button>
           <button class="btn small" data-act="link">링크 복사</button>
           <button class="btn small" data-act="edit">불러와 고치기</button>
           <button class="btn small danger" data-act="del">삭제</button>
@@ -477,6 +503,7 @@ ${draft.passage.trim().slice(0, 12000)}
   $("#sets").addEventListener("click", async (e) => {
     const b = e.target.closest("[data-act]"); if (!b) return;
     const row = b.closest(".set-row"); const id = row.dataset.id; const s = $("#sets")._sets.find((x) => x.id === id);
+    if (b.dataset.act === "qr") showQRBig(studentLink(id), s.title);
     if (b.dataset.act === "link") { const ok = await copyText(studentLink(id)); b.textContent = ok ? "복사했어요" : studentLink(id); }
     if (b.dataset.act === "roster") { rosterId = id; $("#roster-title").textContent = `명단 · ${s.title}`; loadRoster(); }
     if (b.dataset.act === "edit") {
