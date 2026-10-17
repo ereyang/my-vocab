@@ -149,7 +149,8 @@
       <div class="row">
         <input type="password" id="pw" class="title-input pw" placeholder="교사 비밀번호" autocomplete="current-password">
         <button class="btn" id="play">미리 해 보기</button>
-        <button class="btn primary" id="save">저장하고 링크 만들기</button>
+        <button class="btn" id="save-over" hidden>이 문제에 덮어쓰기</button>
+        <button class="btn primary" id="save">새 문제로 저장하고 링크 만들기</button>
       </div>
       <span class="status" id="save-status"></span>
       <div class="linkbox" id="linkbox" hidden></div>
@@ -423,6 +424,8 @@ ${draft.passage.trim().slice(0, 12000)}
     const ok = !!validSet(draft);
     $("#play").disabled = !ok;
     $("#save").disabled = !ok || !API.ready();
+    $("#save-over").hidden = !draft.id;
+    $("#save-over").disabled = !ok || !API.ready();
     if (!draft.selected.length) setStatus("#save-status", "");
     else if (!ok) setStatus("#save-status", pendingWords().length ? "뜻을 아직 넣지 않은 단어가 있어요." : "빨간 칸을 먼저 고쳐 주세요.");
     else if (!API.ready()) setStatus("#save-status", "구글 시트를 연결하면 저장할 수 있어요. 지금은 '미리 해 보기'만 돼요.");
@@ -464,19 +467,23 @@ ${draft.passage.trim().slice(0, 12000)}
     $("#copy-link").onclick = async () => { const ok = await copyText(url); $("#copy-link").textContent = ok ? "복사했어요" : "길게 눌러 복사하세요"; };
     $("#qr-open").onclick = () => showQRBig(url, draft.title);
   }
-  $("#save").addEventListener("click", async () => {
+  async function doSave(overwrite) {
     const set = validSet(draft); if (!set) return;
     const pw = $("#pw").value.trim(); if (!pw) { setStatus("#save-status", "교사 비밀번호를 적어 주세요.", "err"); $("#pw").focus(); return; }
-    const btn = $("#save"); btn.disabled = true;
+    const btn = $(overwrite ? "#save-over" : "#save"); btn.disabled = true;
     setStatus("#save-status", `<span class="spin"></span> 저장하는 중…`);
     try {
-      const j = await API.post({ action: "save", password: pw, id: draft.id || "", title: set.title || "(제목 없음)", data: JSON.stringify(set) });
-      draft.id = j.id; saveDraft();
-      setStatus("#save-status", "저장했어요. 아래 링크를 학생들에게 나눠 주세요.", "good");
+      const j = await API.post({ action: "save", password: pw, id: overwrite ? (draft.id || "") : "", title: set.title || "(제목 없음)", data: JSON.stringify(set) });
+      draft.id = j.id; saveDraft(); updatePlayState();
+      setStatus("#save-status", overwrite ? "덮어썼어요. 링크는 그대로예요." : "새 문제로 저장했어요. 예전 문제와 링크도 그대로 남아 있어요.", "good");
       showLink(j.id);
     } catch (e) { setStatus("#save-status", esc(e.message || "저장하지 못했어요."), "err"); }
     btn.disabled = false;
-  });
+  }
+
+
+  $("#save").addEventListener("click", () => doSave(false));
+  $("#save-over").addEventListener("click", () => doSave(true));
 
   /* ---------- saved sets & roster ---------- */
   let rosterId = null;
