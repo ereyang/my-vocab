@@ -298,27 +298,22 @@
   /* ---------- AI prompt copy / paste ---------- */
   function buildPrompt(words) {
     const pos = wordsInPassage();
-    const targets = words.map((w, id) => ({ id, word: pos.get(w)?.t || w, context: sentenceAt(draft.passage, pos.get(w)?.i ?? 0) }));
-    return `You are helping a Korean high school English teacher build a vocabulary game.
+    const list = words.map((w) => pos.get(w)?.t || w);
+    const ex = list[0] || "observe";
+    return `아래 영어 지문으로 고등학생 단어 게임을 만들려고 해.
 
-PASSAGE:
-"""
-${draft.passage.slice(0, 12000)}
-"""
+[지문]
+${draft.passage.trim().slice(0, 12000)}
 
-TARGET WORDS (each with the passage sentence it appears in):
-${JSON.stringify(targets)}
+[단어] ${list.join(", ")}
 
-For every target word, work out what it means IN THIS PASSAGE'S CONTEXT. Reply with ONLY a JSON array inside one code block, one object per target, same order, shaped like:
-{"id":0,"word":"observe","pos":"동사","meaning":"관찰하다","sentence":"We observe birds in the park every Sunday.","answer":"observe","sentenceKo":"우리는 매주 일요일 공원에서 새를 관찰한다.","object":"magnifier"}
+단어마다 아래 모양으로 채워서, JSON 배열 하나만 코드 블록으로 답해 줘. 다른 설명은 쓰지 마.
+[{"word":"${ex}","pos":"품사","meaning":"지문 속 뜻","sentence":"쉬운 새 영어 문장","answer":"${ex}","sentenceKo":"문장 해석","object":"book"}]
 
-Rules:
-- pos: Korean part of speech (명사, 동사, 형용사, 부사 ...).
-- meaning: the Korean meaning that fits this context, short like a Korean textbook glossary (about 2-10 characters). Match the form in the passage: past tense "encouraged" → "격려했다". Give ONLY the sense used in the passage.
-- sentence: a NEW, easy English sentence (CEFR A2, 6-12 words) using the word in the SAME sense. Do not copy the passage sentence.
-- answer: the exact spelling of the word as it appears in your new sentence (it becomes the blank). It must appear exactly once.
-- sentenceKo: a natural Korean translation of your new sentence.
-- object: the ONE key from this list that best symbolizes the meaning: ${OBJ_KEYS.join(", ")}. Use different keys for different words when you can.`;
+- meaning: 이 지문 문맥에 맞는 우리말 뜻 하나, 짧게
+- sentence: 같은 뜻으로 쓴 쉬운 새 문장 (6~12단어, 지문 문장 복사 금지)
+- answer: sentence 속에 들어간 그 단어의 철자 그대로
+- object: ${OBJ_KEYS.join(", ")} 중 뜻과 어울리는 것 하나`;
   }
   async function copyText(text) {
     try { await navigator.clipboard.writeText(text); return true; }
