@@ -3508,7 +3508,10 @@ zoo=동물원
 
       function showEditing() {
         const cur = list.find((p) => p.id === editingId);
-        $('#editorTitle').textContent = cur ? `지문 고치기: ${cur.title}` : '새 지문 쓰기';
+        $('#editorTitle').textContent = cur
+          ? `✏️ "${cur.title}" 고치는 중 — 저장하면 이 지문이 바뀌어요`
+          : '➕ 새 지문 쓰기 — 저장하면 지문이 하나 더 생겨요 (기존 지문은 그대로)';
+        $('#savePassage').textContent = cur ? '💾 고친 내용 저장' : '💾 새 지문으로 저장';
         ul.querySelectorAll('li').forEach((li) => li.classList.toggle('editing', li.dataset.id === editingId));
       }
 
