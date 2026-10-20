@@ -20,7 +20,7 @@
   const MAX_WORDS = 12;
   const DRAFT_KEY = "wordpuzzle-draft-v1";
   // ▼ 구글 Apps Script 웹 앱 주소 (배포 후 여기에 붙여 넣기)
-  const API_URL = "https://script.google.com/macros/s/AKfycbySbonkI5HdosClNpxXQaUlYTdXbfd5D_nn1u9W-gxv1jf8YEpANPjplfEW4B5p4oq2/exec";
+  const API_URL = "https://script.google.com/macros/s/AKfycbwyU9VuGUg81cgPViydJUTwc_AcMVKw_JF22wfNuOrwnYiDXebcOL34W4VNJSMa8U3Q/exec";
 
   const SAMPLE = {
     title: "Maya and the Comet (예시)",
