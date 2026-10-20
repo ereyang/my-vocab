@@ -6,7 +6,8 @@
  *
  * - GET  ?action=list          : 저장한 문제 목록 (누구나)
  * - GET  ?action=set&id=...    : 문제 하나 (학생 게임이 읽어 감)
- * - POST {action:'result'}     : 학생이 다 끝내면 이름·점수 한 줄 추가 (비밀번호 없음)
+ * - GET  ?action=village       : 반별 마을 (반마다 기관 목록, 누구나)
+ * - POST {action:'result'}     : 학생이 다 끝내면 이름·점수 한 줄 추가 + 반 마을에 기관 하나 (비밀번호 없음)
  * - POST {action:'save'}       : 문제 저장 (교사 비밀번호)
  * - POST {action:'delete'}     : 문제 삭제 (교사 비밀번호)
  * - POST {action:'results'}    : 문제별 명단 보기 (교사 비밀번호)
@@ -22,7 +23,15 @@
 const SETS = '문제';
 const SETS_HEADER = ['id', 'title', 'data', 'updated'];
 const RESULTS = '결과';
-const RESULTS_HEADER = ['time', 'setId', 'setTitle', 'name', 'miss', 'stars', 'seconds', 'words'];
+const RESULTS_HEADER = ['time', 'setId', 'setTitle', 'name', 'miss', 'stars', 'seconds', 'words', 'class', 'sid', 'building'];
+
+// 기관: 키 → 뽑힐 가중치 (보통 10 · 희귀 4 · 전설 1). app.js의 BUILDINGS와 키를 맞춘다.
+const BUILDINGS = {
+  hospital: 10, school: 10, fire: 10, police: 10, library: 10, post: 10, bank: 10, cafe: 10, bakery: 10, market: 10,
+  park: 10, station: 10, cityhall: 10, museum: 10, theater: 10, stadium: 10, pool: 10, flowershop: 10, windmill: 10,
+  hanok: 4, tower: 4, ferris: 4, lighthouse: 4, observatory: 4,
+  castle: 1
+};
 
 function tab_(name, header) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -31,6 +40,8 @@ function tab_(name, header) {
     sh = ss.insertSheet(name);
     sh.appendRow(header);
     sh.setFrozenRows(1);
+  } else if (sh.getLastColumn() < header.length) {
+    sh.getRange(1, 1, 1, header.length).setValues([header]); // 예전 시트에 새 열 이름 추가
   }
   return sh;
 }
@@ -56,8 +67,27 @@ function results_() {
     .filter(function (r) { return r[1]; })
     .map(function (r) {
       return { time: r[0] instanceof Date ? r[0].toISOString() : String(r[0]), setId: String(r[1]), name: plain_(r[3]),
-        miss: Number(r[4]) || 0, stars: Number(r[5]) || 0, seconds: Number(r[6]) || 0 };
+        miss: Number(r[4]) || 0, stars: Number(r[5]) || 0, seconds: Number(r[6]) || 0,
+        cls: String(r[8] || ''), sid: plain_(r[9] || ''), building: String(r[10] || '') };
     });
+}
+
+// "20315 김민지" → { sid: "20315", cls: "2-3" }
+function parseSid_(name) {
+  const m = String(name).match(/^\s*(\d)(\d{2})(\d{2})\s*(.+)$/);
+  if (!m || Number(m[2]) < 1) return null;
+  return { sid: m[1] + m[2] + m[3], cls: Number(m[1]) + '-' + Number(m[2]) };
+}
+function shortName_(name) { return String(name).replace(/^\s*\d{5}\s*/, '') || String(name); }
+
+// 이 반에 아직 없는 기관 중에서 가중치대로 하나 뽑는다. 다 있으면 전체에서 뽑는다.
+function pickBuilding_(have) {
+  let keys = Object.keys(BUILDINGS).filter(function (k) { return have.indexOf(k) < 0; });
+  if (!keys.length) keys = Object.keys(BUILDINGS);
+  const total = keys.reduce(function (a, k) { return a + BUILDINGS[k]; }, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < keys.length; i++) { r -= BUILDINGS[keys[i]]; if (r < 0) return keys[i]; }
+  return keys[0];
 }
 
 function doGet(e) {
@@ -67,6 +97,14 @@ function doGet(e) {
       const s = sets_().filter(function (x) { return x.id === String(p.id); })[0];
       if (!s) return json_({ ok: false, error: '문제를 찾지 못했어요. 선생님께 링크를 다시 받아 주세요.' });
       return json_({ ok: true, set: s });
+    }
+    if (p.action === 'village') {
+      const classes = {};
+      results_().forEach(function (r) {
+        if (!r.cls || !r.building) return;
+        (classes[r.cls] = classes[r.cls] || []).push({ name: shortName_(r.name), building: r.building, setId: r.setId, time: r.time });
+      });
+      return json_({ ok: true, classes: classes });
     }
     // 목록: 단어 수와 제출 인원만 (명단 자체는 비밀번호 필요)
     const counts = {};
@@ -94,10 +132,18 @@ function doPost(e) {
       if (!s) return json_({ ok: false, error: '문제를 찾지 못했어요.' });
       const name = clean_(req.name, 30);
       if (!name) return json_({ ok: false, error: '이름이 없어요.' });
+      // 학번 5자리(학년 1 + 반 2 + 번호 2)에서 반을 알아낸다. 같은 학생·같은 문제는 기관 하나만.
+      const id = parseSid_(name);
+      const all = results_();
+      const key = id ? id.sid : name;
+      const prev = all.filter(function (r) { return r.setId === s.id && r.building && (r.sid || r.name) === key; })[0];
+      let building = '';
+      if (id && !prev) building = pickBuilding_(all.filter(function (r) { return r.cls === id.cls && r.building; }).map(function (r) { return r.building; }));
       tab_(RESULTS, RESULTS_HEADER).appendRow([new Date(), s.id, safe_(s.title), safe_(name),
         Math.max(0, Math.min(999, Number(req.miss) || 0)), Math.max(0, Math.min(3, Number(req.stars) || 0)),
-        Math.max(0, Math.min(86400, Number(req.seconds) || 0)), Math.max(0, Math.min(50, Number(req.words) || 0))]);
-      return json_({ ok: true });
+        Math.max(0, Math.min(86400, Number(req.seconds) || 0)), Math.max(0, Math.min(50, Number(req.words) || 0)),
+        id ? id.cls : '', id ? safe_(id.sid) : '', building]);
+      return json_({ ok: true, building: prev ? prev.building : building, dup: !!prev, cls: id ? id.cls : '' });
     }
 
     const pw = PropertiesService.getScriptProperties().getProperty('TEACHER_PASSWORD');
