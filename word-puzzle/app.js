@@ -171,7 +171,7 @@
 
   <section id="view-village" class="view stack" hidden>
     <article class="panel" id="vil-list">
-      <div class="panel-head"><h2>반별 마을</h2><span class="pill" id="vil-count"></span><button class="btn small push" id="reload-village">새로고침</button></div>
+      <div class="panel-head"><h2>반별 마을</h2><span class="pill" id="vil-count"></span><button class="btn small push" id="vil-back" hidden>← 활동으로 돌아가기</button><button class="btn small" id="reload-village">새로고침</button></div>
       <p class="hint">학생이 단어 활동 한 세트를 끝낼 때마다 그 반 마을에 기관이 하나씩 무작위로 세워져요. 마을을 누르면 크게 볼 수 있어요.</p>
       <span class="status" id="village-status"></span>
       <div class="villages" id="villages"></div>
@@ -191,6 +191,7 @@
         <p class="hint" id="gate-sub">학번 5자리와 이름을 적고 시작하세요. 다 끝내면 선생님께 제출되고, 우리 반 마을에 기관이 하나 세워져요.</p>
         <label class="field"><span class="lbl2">학번 이름</span><input id="student-name" class="title-input" placeholder="예: 20315 김민지" autocomplete="name" maxlength="30"></label>
         <button class="btn primary big" id="gate-go">시작하기</button>
+        <button class="btn big" id="gate-village">🏘️ 반별 마을 구경하기</button>
         <span class="status" id="gate-status"></span>
       </article>
     </div>
@@ -248,6 +249,7 @@
       if (!G) startGame(validSet(draft) || SAMPLE);
       else requestAnimationFrame(layoutPuzzle);
     }
+    if (v === "game" && STUDENT && G) requestAnimationFrame(layoutPuzzle);
     if (v === "saved") loadSets();
     if (v === "village") { closeVillage(); loadVillage(villageOpen); villageOpen = null; }
   }
@@ -988,7 +990,8 @@ ${draft.passage.trim().slice(0, 12000)}
         ? `이 활동으로는 이미 ${b[0]}을(를) 지었어요. 마을에는 그대로 하나만 있어요.`
         : `${cls ? clsLabel(cls.cls) + " " : ""}마을에 세워졌어요!`;
       completeBuilding(j.building);
-      if (cls) $("#done-acts").insertAdjacentHTML("afterbegin", `<a class="btn primary big" href="./?village=${encodeURIComponent(cls.cls)}">우리 반 마을 보기 →</a>`);
+      if (cls) $("#done-acts").insertAdjacentHTML("afterbegin", `<button class="btn primary big" id="to-village">우리 반 마을 보기 →</button>`);
+      if (cls) $("#to-village").addEventListener("click", () => openVillageFromGame(cls.cls));
     } catch (e) {
       setSiteBusy(false);
       G.submitted = false;
@@ -1527,6 +1530,13 @@ ${draft.passage.trim().slice(0, 12000)}
   $("#villages").addEventListener("click", (e) => { const c = e.target.closest(".vcard"); if (c) openVillage(c.dataset.cls); });
   $("#vd-close").addEventListener("click", closeVillage);
   $("#reload-village").addEventListener("click", () => { closeVillage(); loadVillage(); });
+  // 학생 화면: 활동 중에도 앱 안에서 마을을 보고 다시 돌아온다
+  function openVillageFromGame(cls) {
+    villageOpen = cls || null;
+    $("#vil-back").hidden = false;
+    showView("village");
+  }
+  $("#vil-back").addEventListener("click", () => { closeVillage(); showView("game"); window.scrollTo({ top: 0 }); });
 
   /* ---------- boot ---------- */
   let studentName = "";
@@ -1549,6 +1559,7 @@ ${draft.passage.trim().slice(0, 12000)}
     try { studentName = sessionStorage.getItem("wp-name") || ""; } catch {}
     $("#student-name").value = studentName;
     const go = $("#gate-go"); go.disabled = true;
+    $("#gate-village").addEventListener("click", () => openVillageFromGame(null));
     const loadSet = async () => {
       if (SET_ID === "sample") return clone(SAMPLE);
       if (!API.ready()) throw new Error("선생님이 아직 연결을 마치지 않았어요.");
