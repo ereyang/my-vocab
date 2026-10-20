@@ -182,6 +182,16 @@
       <p class="hint">끌어서 돌리고, 두 손가락으로 벌리면 커져요.</p>
       <ul class="vd-list" id="vd-list"></ul>
     </article>
+    <article class="panel" id="vil-reset" hidden>
+      <div class="panel-head"><h2>마을 초기화</h2></div>
+      <p class="hint">새 학기나 새 단원을 시작할 때 마을을 빈 땅으로 되돌려요. 학생 명단과 점수는 그대로 남고, 지었던 기관은 시트 결과 탭의 archived 칸에 기록으로 남아요. 초기화 뒤에는 같은 지문을 다시 끝내도 새 기관이 나와요.</p>
+      <div class="row">
+        <select id="reset-cls" class="title-input pw" aria-label="초기화할 반"></select>
+        <input type="password" id="pw3" class="title-input pw" placeholder="교사 비밀번호" autocomplete="current-password">
+        <button class="btn danger" id="reset-go">초기화</button>
+      </div>
+      <span class="status" id="reset-status"></span>
+    </article>
   </section>
 
   <section id="view-game" class="view stack">
@@ -449,7 +459,7 @@ ${draft.passage.trim().slice(0, 12000)}
   $("#play").addEventListener("click", () => { const s = validSet(draft); if (!s) return; startGame(s); showView("game"); });
 
   /* ---------- save to sheet ---------- */
-  for (const id of ["#pw", "#pw2"]) { $(id).value = getPw(); $(id).addEventListener("input", (e) => { setPw(e.target.value); $("#pw").value = $("#pw2").value = e.target.value; }); }
+  for (const id of ["#pw", "#pw2", "#pw3"]) { $(id).value = getPw(); $(id).addEventListener("input", (e) => { setPw(e.target.value); $("#pw").value = $("#pw2").value = $("#pw3").value = e.target.value; }); }
   const studentLink = (id) => location.origin + location.pathname + "?set=" + encodeURIComponent(id);
   function drawQR(el, url, px) {
     el.innerHTML = "";
@@ -1429,7 +1439,7 @@ ${draft.passage.trim().slice(0, 12000)}
       const j = await API.get({ action: "village" });
       if (!j.classes) throw new Error("선생님이 시트 코드를 새 버전으로 바꿔야 마을이 보여요.");
       VIL = j.classes;
-      renderVillages();
+      renderVillages(); renderResetPanel();
       setStatus("#village-status", "");
       if (openCls) openVillage(openCls);
     } catch (e) { setStatus("#village-status", esc(e.message || "불러오지 못했어요."), "err"); }
@@ -1451,6 +1461,27 @@ ${draft.passage.trim().slice(0, 12000)}
     }).join("");
     snapshotVillages(keys);
   }
+  function renderResetPanel() {
+    // 교사 화면(탭이 보이는 경우)에서만
+    const show = !STUDENT && VILLAGE === null;
+    $("#vil-reset").hidden = !show; if (!show) return;
+    const keys = sortedClasses();
+    $("#reset-cls").innerHTML = `<option value="">전체 반</option>` + keys.map((k) => `<option value="${esc(k)}">${esc(clsLabel(k))} (기관 ${VIL[k].length}개)</option>`).join("");
+    $("#reset-go").disabled = !keys.length;
+  }
+  $("#reset-go").addEventListener("click", async () => {
+    const pw = $("#pw3").value.trim(); if (!pw) { setStatus("#reset-status", "교사 비밀번호를 적어 주세요.", "err"); $("#pw3").focus(); return; }
+    const cls = $("#reset-cls").value, label = cls ? clsLabel(cls) : "전체 반";
+    if (!confirm(`${label} 마을을 빈 땅으로 되돌릴까요?
+학생 명단과 점수는 그대로 남아요.`)) return;
+    setStatus("#reset-status", `<span class="spin"></span> 초기화하는 중…`);
+    try {
+      const j = await API.post({ action: "resetVillage", password: pw, cls });
+      if (j.cleared == null) throw new Error("시트 코드를 새 버전으로 바꿔야 초기화할 수 있어요.");
+      closeVillage(); await loadVillage();
+      setStatus("#reset-status", `${esc(label)} 마을을 초기화했어요. (기관 ${j.cleared}개 정리)`, "good");
+    } catch (e) { setStatus("#reset-status", esc(e.message || "초기화하지 못했어요."), "err"); }
+  });
   // 렌더러 하나로 반마다 사진을 찍어 카드에 넣는다 (태블릿에서 WebGL 창을 여러 개 띄우지 않으려고)
   function snapshotVillages(keys) {
     if (!window.THREE) return;
@@ -1470,7 +1501,7 @@ ${draft.passage.trim().slice(0, 12000)}
   function openVillage(cls) {
     const list = VIL?.[cls];
     if (!list) { setStatus("#village-status", `${esc(clsLabel(cls))}에는 아직 기관이 없어요.`); return; }
-    $("#vil-list").hidden = true; $("#vil-detail").hidden = false;
+    $("#vil-list").hidden = true; $("#vil-reset").hidden = true; $("#vil-detail").hidden = false;
     $("#vd-title").textContent = `${clsLabel(cls)} 마을`;
     $("#vd-level").textContent = `${levelOf(list.length)} · 기관 ${list.length}개`;
     const byName = new Map();
@@ -1481,7 +1512,7 @@ ${draft.passage.trim().slice(0, 12000)}
   }
   function closeVillage() {
     disposeVillageView();
-    $("#vil-detail").hidden = true; $("#vil-list").hidden = false;
+    $("#vil-detail").hidden = true; $("#vil-list").hidden = false; if (VIL) renderResetPanel();
   }
   function initVillageView(cls, list) {
     disposeVillageView();

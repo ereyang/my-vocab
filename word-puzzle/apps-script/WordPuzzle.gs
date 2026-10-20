@@ -10,6 +10,7 @@
  * - POST {action:'result'}     : 학생이 다 끝내면 이름·점수 한 줄 추가 + 반 마을에 기관 하나 (비밀번호 없음)
  * - POST {action:'save'}       : 문제 저장 (교사 비밀번호)
  * - POST {action:'delete'}     : 문제 삭제 (교사 비밀번호)
+ * - POST {action:'resetVillage'}: 마을 초기화 (교사 비밀번호, cls 비우면 전체 반)
  * - POST {action:'results'}    : 문제별 명단 보기 (교사 비밀번호)
  *
  * 교사 비밀번호는 코드에 적지 않는다.
@@ -23,7 +24,7 @@
 const SETS = '문제';
 const SETS_HEADER = ['id', 'title', 'data', 'updated'];
 const RESULTS = '결과';
-const RESULTS_HEADER = ['time', 'setId', 'setTitle', 'name', 'miss', 'stars', 'seconds', 'words', 'class', 'sid', 'building'];
+const RESULTS_HEADER = ['time', 'setId', 'setTitle', 'name', 'miss', 'stars', 'seconds', 'words', 'class', 'sid', 'building', 'archived'];
 
 // 기관: 키 → 뽑힐 가중치 (보통 10 · 희귀 4 · 전설 1). app.js의 BUILDINGS와 키를 맞춘다.
 const BUILDINGS = {
@@ -168,6 +169,21 @@ function doPost(e) {
       const r = rowOf(req.id);
       if (r > 0) sh.deleteRow(r);
       return json_({ ok: true });
+    }
+
+    // 마을 초기화: building 칸을 archived 칸으로 옮긴다 (기록은 남고 마을에서만 빠짐)
+    if (req.action === 'resetVillage') {
+      const rs = tab_(RESULTS, RESULTS_HEADER);
+      const vals = rs.getDataRange().getValues();
+      const cls = String(req.cls || '');
+      let n = 0;
+      for (let i = 1; i < vals.length; i++) {
+        if (!vals[i][10] || (cls && String(vals[i][8]) !== cls)) continue;
+        const old = vals[i][11] ? String(vals[i][11]) + ',' : '';
+        rs.getRange(i + 1, 11, 1, 2).setValues([['', old + vals[i][10]]]);
+        n++;
+      }
+      return json_({ ok: true, cleared: n });
     }
 
     if (req.action === 'results') {
