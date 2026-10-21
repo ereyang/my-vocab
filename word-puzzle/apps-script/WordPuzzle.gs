@@ -69,7 +69,7 @@ function results_() {
     .map(function (r) {
       return { time: r[0] instanceof Date ? r[0].toISOString() : String(r[0]), setId: String(r[1]), name: plain_(r[3]),
         miss: Number(r[4]) || 0, stars: Number(r[5]) || 0, seconds: Number(r[6]) || 0,
-        cls: String(r[8] || ''), sid: plain_(r[9] || ''), building: String(r[10] || '') };
+        cls: cls_(r[8]), sid: plain_(r[9] || ''), building: String(r[10] || '') };
     });
 }
 
@@ -78,6 +78,11 @@ function parseSid_(name) {
   const m = String(name).match(/^\s*(\d)(\d{2})(\d{2})\s*(.+)$/);
   if (!m || Number(m[2]) < 1) return null;
   return { sid: m[1] + m[2] + m[3], cls: Number(m[1]) + '-' + Number(m[2]) };
+}
+// 시트가 "2-3"을 날짜(2월 3일)로 바꿔 저장한 옛 기록도 "2-3"으로 되돌린다.
+function cls_(v) {
+  if (v instanceof Date) return (v.getMonth() + 1) + '-' + v.getDate();
+  return String(v || '');
 }
 function shortName_(name) { return String(name).replace(/^\s*\d{5}\s*/, '') || String(name); }
 
@@ -143,7 +148,7 @@ function doPost(e) {
       tab_(RESULTS, RESULTS_HEADER).appendRow([new Date(), s.id, safe_(s.title), safe_(name),
         Math.max(0, Math.min(999, Number(req.miss) || 0)), Math.max(0, Math.min(3, Number(req.stars) || 0)),
         Math.max(0, Math.min(86400, Number(req.seconds) || 0)), Math.max(0, Math.min(50, Number(req.words) || 0)),
-        id ? id.cls : '', id ? safe_(id.sid) : '', building]);
+        id ? "'" + id.cls : '', id ? safe_(id.sid) : '', building]);
       return json_({ ok: true, building: prev ? prev.building : building, dup: !!prev, cls: id ? id.cls : '' });
     }
 
@@ -178,7 +183,7 @@ function doPost(e) {
       const cls = String(req.cls || '');
       let n = 0;
       for (let i = 1; i < vals.length; i++) {
-        if (!vals[i][10] || (cls && String(vals[i][8]) !== cls)) continue;
+        if (!vals[i][10] || (cls && cls_(vals[i][8]) !== cls)) continue;
         const old = vals[i][11] ? String(vals[i][11]) + ',' : '';
         rs.getRange(i + 1, 11, 1, 2).setValues([['', old + vals[i][10]]]);
         n++;

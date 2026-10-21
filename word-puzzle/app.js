@@ -1411,7 +1411,7 @@ ${draft.passage.trim().slice(0, 12000)}
     const fountain = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.38, 0.12, 20), M(CL.stone)); fountain.position.set(0, 0.12, 0); root.add(fountain);
     const water = new THREE.Mesh(new THREE.CylinderGeometry(0.29, 0.29, 0.02, 20), M(0x4FB3E8, { metalness: 0.2, roughness: 0.2 })); water.position.set(0, 0.18, 0); root.add(water);
     const flagPole = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 1.1, 6), M(CL.gray)); flagPole.position.set(0, 0.6, 0); root.add(flagPole);
-    const flag = textSprite(clsLabel(cls), { size: labels ? 0.34 : 0.55, bg: "rgba(36,72,216,.95)", weight: 700 }); flag.position.set(0, labels ? 1.35 : 1.5, 0); root.add(flag);
+    const flag = textSprite(clsLabel(cls), { size: labels ? 0.3 : 0.36, bg: "rgba(36,72,216,.95)", weight: 700 }); flag.position.set(0, labels ? 1.35 : 1.5, 0); root.add(flag);
     const spins = [];
     list.forEach((b, idx) => {
       const [i, j] = used[idx]; const x = i * LOT, z = j * LOT;
@@ -1430,6 +1430,14 @@ ${draft.passage.trim().slice(0, 12000)}
   }
 
   let VIL = null; // 반별 데이터
+  // 시트가 "2-3"을 날짜로 바꿔 보낸 경우("Tue Feb 03 2026 …", "2026-02-02T15:00…")도 "2-3"으로 되돌린다.
+  function normCls(k) {
+    if (/^d+-d+$/.test(k)) return k;
+    const m = String(k).match(/^w{3} (w{3}) (d{1,2}) d{4}/);
+    if (m) { const mo = "JanFebMarAprMayJunJulAugSepOctNovDec".indexOf(m[1]) / 3 + 1; if (mo > 0) return `${mo}-${Number(m[2])}`; }
+    const d = new Date(k); return isNaN(d) ? k : `${d.getMonth() + 1}-${d.getDate()}`;
+  }
+  function normClasses(c) { const o = {}; Object.entries(c).forEach(([k, v]) => { const n = normCls(k); (o[n] = o[n] || []).push(...v); }); return o; }
   let VD = null;  // 크게 보기 렌더러
   async function loadVillage(openCls) {
     const st = $("#village-status");
@@ -1438,7 +1446,7 @@ ${draft.passage.trim().slice(0, 12000)}
     try {
       const j = await API.get({ action: "village" });
       if (!j.classes) throw new Error("선생님이 시트 코드를 새 버전으로 바꿔야 마을이 보여요.");
-      VIL = j.classes;
+      VIL = normClasses(j.classes);
       renderVillages(); renderResetPanel();
       setStatus("#village-status", "");
       if (openCls) openVillage(openCls);
