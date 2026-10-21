@@ -303,3 +303,9 @@ body { margin: 0; }
 .vd-list { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .vd-list li { font-size: 14px; padding: 6px 12px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); }
 .vd-list li b { margin-right: 4px; }
+
+/* 1단계 건너뛰기 */
+.skip-bar { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 12px 14px; border-radius: 14px; border: 2px solid var(--pop); background: color-mix(in srgb, var(--pop) 16%, var(--surface-2)); font-weight: 600; }
+.skip-bar[hidden] { display: none; }
+.skip-bar span { flex: 1 1 220px; }
+.btn.skip-toggle.on { background: var(--pop); color: var(--on-pop); border-color: transparent; }

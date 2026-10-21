@@ -213,6 +213,7 @@
     <div class="done" id="done" hidden></div>
 
     <div id="stage1" class="stage">
+      <div class="skip-bar" id="skip1" hidden><span id="skip1-text">선생님이 1단계를 건너뛰어도 된다고 했어요.</span><button class="btn primary" id="skip1-go">2단계로 바로 가기 →</button></div>
       <article class="panel">
         <div class="panel-head"><h2>영어 ↔ 우리말 짝 맞추기</h2><span class="pill" id="match-count"></span></div>
         <p class="hint">영어 단어와 문맥상 뜻을 하나씩 누르세요. 맞히면 퍼즐 조각이 생겨요.</p>
@@ -442,7 +443,7 @@ ${draft.passage.trim().slice(0, 12000)}
   });
   function validSet(d) {
     if (!d.items?.length || pendingWordsOf(d).length || d.items.some((i) => itemProblems(i).length)) return null;
-    return { title: d.title || "", passage: d.passage, items: d.items.map((i) => ({ word: i.word, pos: i.pos, meaning: i.meaning, sentence: i.sentence, answer: i.answer, sentenceKo: i.sentenceKo })) };
+    return { title: d.title || "", passage: d.passage, ...(d.skip1 ? { skip1: true } : {}), items:d.items.map((i) => ({ word: i.word, pos: i.pos, meaning: i.meaning, sentence: i.sentence, answer: i.answer, sentenceKo: i.sentenceKo })) };
   }
   function pendingWordsOf(d) { const have = new Set(d.items.map((i) => i.word.toLowerCase())); return (d.selected || []).filter((w) => !have.has(w)); }
   function updatePlayState() {
@@ -523,13 +524,37 @@ ${draft.passage.trim().slice(0, 12000)}
         <div class="set-info"><b>${esc(s.title)}</b><span class="hint">${esc(fmtTime(s.updated))} · 단어 ${s.words}개 · 제출 ${s.done}명</span></div>
         <div class="set-acts">
           <button class="btn small" data-act="roster">명단 보기</button>
+          <button class="btn small skip-toggle" data-act="skip" disabled>1단계 건너뛰기 …</button>
           <button class="btn small" data-act="qr">QR</button>
           <button class="btn small" data-act="link">링크 복사</button>
           <button class="btn small" data-act="edit">불러와 고치기</button>
           <button class="btn small danger" data-act="del">삭제</button>
         </div></div>`).join("");
       box._sets = sets;
+      // 목록에는 문제 내용이 없어서, 건너뛰기 허용 여부는 문제마다 따로 읽어 온다
+      for (const s of sets) API.get({ action: "set", id: s.id })
+        .then(({ set }) => { s.skip1 = !!JSON.parse(set.data).skip1; showSkip(s); })
+        .catch(() => { s.skip1 = false; showSkip(s); });
     } catch (e) { box.innerHTML = `<p class="notice">${esc(e.message || "불러오지 못했어요.")}</p>`; }
+  }
+  function showSkip(s) {
+    const b = $(`#sets .set-row[data-id="${CSS.escape(s.id)}"] [data-act="skip"]`); if (!b) return;
+    b.disabled = false; b.classList.toggle("on", s.skip1);
+    b.textContent = s.skip1 ? "1단계 건너뛰기 허용됨 ✓" : "1단계 건너뛰기 허용";
+  }
+  async function toggleSkip(s, b) {
+    const pw = $("#pw2").value.trim(); if (!pw) { setStatus("#roster-status", "건너뛰기를 바꾸려면 교사 비밀번호를 적어 주세요.", "err"); $("#pw2").focus(); return; }
+    b.disabled = true; b.innerHTML = `<span class="spin"></span> 바꾸는 중…`;
+    try {
+      const { set } = await API.get({ action: "set", id: s.id });
+      const d = JSON.parse(set.data);
+      if (s.skip1) delete d.skip1; else d.skip1 = true;
+      await API.post({ action: "save", password: pw, id: s.id, title: set.title, data: JSON.stringify(d) });
+      s.skip1 = !!d.skip1;
+      if (draft.id === s.id) { draft.skip1 = s.skip1; saveDraft(); }
+      setStatus("#roster-status", s.skip1 ? `'${esc(s.title)}' 학생들에게 '2단계로 바로 가기' 버튼이 나와요. (이미 하고 있는 학생은 30초 안에 나와요)` : `'${esc(s.title)}' 건너뛰기를 껐어요.`, "good");
+    } catch (e) { setStatus("#roster-status", esc(e.message || "바꾸지 못했어요."), "err"); }
+    showSkip(s);
   }
   $("#reload-sets").addEventListener("click", loadSets);
   $("#sets").addEventListener("click", async (e) => {
@@ -537,12 +562,13 @@ ${draft.passage.trim().slice(0, 12000)}
     const row = b.closest(".set-row"); const id = row.dataset.id; const s = $("#sets")._sets.find((x) => x.id === id);
     if (b.dataset.act === "qr") showQRBig(studentLink(id), s.title);
     if (b.dataset.act === "link") { const ok = await copyText(studentLink(id)); b.textContent = ok ? "복사했어요" : studentLink(id); }
+    if (b.dataset.act === "skip") toggleSkip(s, b);
     if (b.dataset.act === "roster") { rosterId = id; $("#roster-title").textContent = `명단 · ${s.title}`; loadRoster(); }
     if (b.dataset.act === "edit") {
       try {
         const { set } = await API.get({ action: "set", id });
         const d = JSON.parse(set.data);
-        draft = { id, title: d.title || "", passage: d.passage || "", items: d.items.map((it, i) => fixItem({ ...it }, i)), selected: d.items.map((it) => it.word.toLowerCase()) };
+        draft = { id, title: d.title || "", passage: d.passage || "", skip1: !!d.skip1, items: d.items.map((it, i) => fixItem({ ...it }, i)), selected: d.items.map((it) => it.word.toLowerCase()) };
         orderSelected(); saveDraft(); fillSetupFields(); renderPicker(); renderItems(); showLink(id); showView("setup");
       } catch (err) { b.textContent = "불러오지 못했어요"; }
     }
@@ -595,7 +621,7 @@ ${draft.passage.trim().slice(0, 12000)}
     $("#stage1").hidden = false; $("#stage2").hidden = true; $("#to-stage2").hidden = true;
     $("#sent-card").className = "sentence-card";
     $("#sent-card").innerHTML = `<span class="lbl">문장</span><p class="ko">짝을 맞히면 그 단어가 들어간 쉬운 문장이 여기 나와요.</p>`;
-    updateStepper(); updateMiss();
+    updateStepper(); updateMiss(); updateSkip();
     buildMatch();
     await waitFonts();
     buildPuzzle();
@@ -607,6 +633,22 @@ ${draft.passage.trim().slice(0, 12000)}
     $("#st2").className = G.stage === 2 ? "on" : "";
   }
   function updateMiss() { $("#g-miss").textContent = `실수 ${G.miss}`; }
+
+  /* ---------- 1단계 건너뛰기: 교사가 '내 문제' 탭에서 허용하면 버튼이 나온다 (미리보기에서는 늘 보임) ---------- */
+  function updateSkip() {
+    const on = !!G && G.stage === 1 && (!STUDENT || !!G.set.skip1);
+    $("#skip1").hidden = !on;
+    $("#skip1-text").textContent = STUDENT ? "선생님이 1단계를 건너뛰어도 된다고 했어요." : "미리보기: 학생 화면에는 '내 문제' 탭에서 허용해야 나와요.";
+  }
+  $("#skip1-go").addEventListener("click", () => { if (G && G.stage === 1) startStage2(); });
+  // 학생이 1단계를 하는 동안 30초마다 허용 여부를 다시 확인한다
+  setInterval(async () => {
+    if (!STUDENT || SET_ID === "sample" || !API.ready() || !G || G.stage !== 1 || document.hidden) return;
+    try {
+      const { set } = await API.get({ action: "set", id: SET_ID });
+      if (G && G.stage === 1) { G.set.skip1 = !!JSON.parse(set.data).skip1; updateSkip(); }
+    } catch {}
+  }, 30000);
 
   /* ---------- stage 1: matching ---------- */
   function buildMatch() {
@@ -871,7 +913,7 @@ ${draft.passage.trim().slice(0, 12000)}
 
   /* ---------- stage 2: blanks + 3D ---------- */
   function startStage2() {
-    G.stage = 2; updateStepper();
+    G.stage = 2; updateStepper(); updateSkip();
     $("#stage1").hidden = true; $("#stage2").hidden = false;
     $("#bank").innerHTML = shuffle(G.items).map((it) => `<button class="chip" data-id="${it.id}">${esc(it.answer)}</button>`).join("");
     $("#blanks").innerHTML = G.items.map((it) => {
